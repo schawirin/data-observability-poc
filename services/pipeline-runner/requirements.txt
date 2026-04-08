@@ -1,0 +1,7 @@
+mysql-connector-python
+minio
+pyarrow
+pandas
+ddtrace
+oracledb
+pymssql

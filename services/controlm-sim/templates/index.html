@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Exchange — Control-M Job Monitor</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #161b22;
+    --surface2: #1e2430;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --green: #3fb950;
+    --green-dim: #238636;
+    --blue: #58a6ff;
+    --blue-dim: #1f6feb;
+    --red: #f85149;
+    --red-dim: #da3633;
+    --yellow: #d29922;
+    --purple: #bc8cff;
+    --cyan: #39d2c0;
+    --gray: #484f58;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ─────────────────────────────── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .logo-icon {
+    background: linear-gradient(135deg, var(--blue-dim), var(--blue));
+    color: #fff;
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 900;
+    font-size: 14px;
+  }
+  .logo-sub { color: var(--text-muted); font-weight: 400; font-size: 14px; margin-left: 4px; }
+
+  .header-right { display: flex; align-items: center; gap: 16px; }
+  .dd-links { display: flex; gap: 12px; }
+  .dd-link {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .dd-link:hover { color: var(--blue); border-color: var(--blue-dim); }
+  .pipeline-badge {
+    padding: 5px 14px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .badge-idle  { background: var(--border); color: var(--text-muted); }
+  .badge-run   { background: #0d2044; color: var(--blue); border: 1px solid var(--blue-dim); animation: blink 1.2s infinite; }
+  .badge-ok    { background: #0d2d1a; color: var(--green); border: 1px solid var(--green-dim); }
+  .badge-fail  { background: #2d0d0d; color: var(--red); border: 1px solid var(--red-dim); }
+  @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:.5; } }
+
+  /* ── MAIN LAYOUT ─────────────────────────── */
+  .layout {
+    display: flex;
+    height: calc(100vh - 57px);
+  }
+
+  /* ── SIDEBAR ─────────────────────────────── */
+  .sidebar {
+    width: 300px;
+    min-width: 300px;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .sidebar-section {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-bottom: 12px;
+  }
+  .form-group label {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  input[type="date"], select, input[type="text"], textarea {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    width: 100%;
+  }
+  input[type="date"]:focus, select:focus, input[type="text"]:focus, textarea:focus {
+    outline: none;
+    border-color: var(--blue);
+    box-shadow: 0 0 0 2px rgba(88,166,255,0.15);
+  }
+  textarea { resize: vertical; min-height: 60px; font-size: 12px; font-family: 'SF Mono', monospace; }
+
+  .btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+  .btn:hover { filter: brightness(1.15); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; filter: none; }
+  .btn-primary  { background: var(--green-dim); color: #fff; border-color: var(--green-dim); }
+  .btn-blue     { background: var(--blue-dim); color: #fff; border-color: var(--blue-dim); }
+  .btn-danger   { background: transparent; color: var(--red); border-color: var(--red-dim); }
+  .btn-ghost    { background: transparent; color: var(--text-muted); border-color: var(--border); }
+  .btn-warn     { background: transparent; color: var(--yellow); border-color: #9e6a03; }
+  .btn-sm       { padding: 5px 10px; font-size: 12px; }
+  .btn-full     { width: 100%; justify-content: center; }
+
+  .job-edit-panel { padding: 0; }
+  .job-edit-header {
+    padding: 12px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .job-edit-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--blue);
+  }
+  .job-edit-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 8px 16px 12px;
+    line-height: 1.5;
+    border-bottom: 1px solid var(--border);
+  }
+  .job-edit-fields { padding: 12px 16px; }
+
+  /* ── JOB STEPS (step queue list) ─────────── */
+  .step-list { list-style: none; }
+  .step-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.1s;
+    border-radius: 4px;
+    padding: 7px 8px;
+  }
+  .step-item:hover { background: rgba(88,166,255,0.06); }
+  .step-item.selected { background: rgba(88,166,255,0.1); }
+  .step-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .step-dot-wait   { background: var(--gray); }
+  .step-dot-run    { background: var(--blue); animation: blink 1s infinite; }
+  .step-dot-ok     { background: var(--green); }
+  .step-dot-fail   { background: var(--red); }
+  .step-name { font-size: 12px; font-weight: 600; flex: 1; }
+  .step-sla  { font-size: 11px; color: var(--text-muted); }
+
+  .add-step-form { display: none; }
+  .add-step-form.visible { display: block; }
+
+  /* ── CONTENT ─────────────────────────────── */
+  .content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── TOOLBAR ─────────────────────────────── */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-wrap: wrap;
+  }
+  .toolbar-sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
+  .toolbar-label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+
+  /* ── JOB ORDER MONITOR ───────────────────── */
+  .monitor-wrapper {
+    flex: 0 0 auto;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--border);
+  }
+  .monitor-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 700px;
+  }
+  .monitor-table thead tr {
+    background: var(--surface2);
+    border-bottom: 2px solid var(--border);
+  }
+  .monitor-table th {
+    padding: 9px 14px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .monitor-table tbody tr {
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .monitor-table tbody tr:hover { background: rgba(88,166,255,0.04); }
+  .monitor-table tbody tr.selected-row { background: rgba(88,166,255,0.08); }
+  .monitor-table td {
+    padding: 10px 14px;
+    white-space: nowrap;
+  }
+  .job-order-num {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: 'SF Mono', monospace;
+  }
+  .job-name-cell { font-weight: 600; font-size: 13px; }
+  .job-dep  { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+  /* Status chips */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .chip-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .chip-wait  { background: rgba(72,79,88,.25); color: var(--gray); }
+  .chip-run   { background: rgba(88,166,255,.12); color: var(--blue); border: 1px solid rgba(88,166,255,.3); }
+  .chip-ok    { background: rgba(63,185,80,.12); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+  .chip-fail  { background: rgba(248,81,73,.12); color: var(--red); border: 1px solid rgba(248,81,73,.3); }
+  .chip-sla   { background: rgba(210,153,34,.12); color: var(--yellow); border: 1px solid rgba(210,153,34,.3); }
+
+  .fault-tag {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(210,153,34,.15);
+    color: var(--yellow);
+    border: 1px solid rgba(210,153,34,.3);
+    margin-left: 6px;
+    font-weight: 600;
+  }
+  .mono { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; }
+
+  /* ── CONSOLE ─────────────────────────────── */
+  .console-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .console-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+  .console-header-left { display: flex; align-items: center; gap: 6px; }
+  .console-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .dot-r { background: #f85149; }
+  .dot-y { background: #d29922; }
+  .dot-g { background: #3fb950; }
+  .console-title { font-size: 12px; color: var(--text-muted); font-weight: 600; margin-left: 6px; }
+  .console-body {
+    flex: 1;
+    padding: 12px 16px;
+    overflow-y: auto;
+    font-family: 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    scroll-behavior: smooth;
+  }
+  .console-body::-webkit-scrollbar { width: 4px; }
+  .console-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .log-line { white-space: pre-wrap; word-break: break-all; }
+  .log-ts      { color: #484f58; }
+  .log-info    { color: var(--text); }
+  .log-success { color: var(--green); }
+  .log-warn    { color: var(--yellow); }
+  .log-error   { color: var(--red); }
+  .log-job-start  { color: var(--blue); font-weight: 600; }
+  .log-pipe-ok    { color: var(--green); font-weight: 700; }
+  .log-pipe-fail  { color: var(--red); font-weight: 700; }
+
+  /* ── DQ RESULTS INLINE ───────────────────── */
+  .dq-panel {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--surface2);
+    display: none;
+  }
+  .dq-panel.visible { display: block; }
+  .dq-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .dq-grid { display: flex; gap: 8px; flex-wrap: wrap; }
+  .dq-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    min-width: 140px;
+  }
+  .dq-card-label { color: var(--text-muted); font-size: 11px; margin-bottom: 4px; }
+  .dq-card-val { font-weight: 700; font-size: 16px; }
+  .dq-val-pass { color: var(--green); }
+  .dq-val-fail { color: var(--red); }
+
+  /* ── ADD STEP MODAL ──────────────────────── */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    width: 420px;
+    max-width: 95vw;
+  }
+  .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+  .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+
+  /* ── FILES EXPORTED ──────────────────────── */
+  .files-panel {
+    padding: 8px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    display: none;
+    font-size: 12px;
+  }
+  .files-panel.visible { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .files-label { color: var(--text-muted); font-weight: 600; }
+  .file-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    background: rgba(88,166,255,.08);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--blue);
+    font-family: 'SF Mono', monospace;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ── -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">CTM</div>
+    Exchange <span class="logo-sub">Job Order Monitor &mdash; market_d1_pipeline</span>
+  </div>
+  <div class="header-right">
+    <div class="dd-links">
+      <a class="dd-link" href="https://app.{{ dd_site }}/data-jobs" target="_blank">&#128202; Jobs</a>
+      <a class="dd-link" href="https://app.{{ dd_site }}/data-jobs/lineage" target="_blank">&#128279; Lineage</a>
+      <a class="dd-link" href="https://app.{{ dd_site }}/databases" target="_blank">&#128200; DBM</a>
+      <a class="dd-link" href="https://app.{{ dd_site }}/logs?query=service%3Ademo-etl-pipeline" target="_blank">&#128196; Logs</a>
+    </div>
+    <div class="pipeline-badge badge-idle" id="pipelineBadge">Idle</div>
+  </div>
+</div>
+
+<!-- ── LAYOUT ── -->
+<div class="layout">
+
+  <!-- ── LEFT SIDEBAR ── -->
+  <div class="sidebar">
+
+    <!-- Run Controls -->
+    <div class="sidebar-section">
+      <div class="sidebar-title">Parâmetros de Execução</div>
+      <div class="form-group">
+        <label>Data de Negócio (ODATE)</label>
+        <input type="date" id="businessDate" />
+      </div>
+      <div class="form-group">
+        <label>Injetar Falha</label>
+        <select id="faultType">
+          <option value="">— Nenhuma (Happy Path) —</option>
+          <optgroup label="DQ Faults (pipeline OK, gate FAIL)">
+            <option value="duplicate_trades">Caso 1: 4 linhas duplicadas (ASTADRVT_TRADE_MVMT)</option>
+            <option value="null_settlement_price">Caso 2: Coluna vazia (ASTANO_FGBE_DRVT_PSTN)</option>
+            <option value="zero_sum_positions">Caso 3: Soma A+B=0 (ASTACASH_MRKT_PSTN)</option>
+            <option value="all">Todos os 3 DQ casos</option>
+          </optgroup>
+          <optgroup label="Hard Failures (job ENDED NOT OK)">
+            <option value="oracle_timeout">Oracle TNS timeout (close_market_eod FAIL)</option>
+            <option value="gate_fail_hard">DQ Gate hard fail (quality_gate FAIL)</option>
+            <option value="s3_down">S3/MinIO down (publish_d1_reports FAIL)</option>
+            <option value="all_hard">3 DQ casos + gate hard fail</option>
+          </optgroup>
+          <optgroup label="Database Contention (DBM)">
+            <option value="db_blocking">DB Blocking (exclusive lock 10s)</option>
+            <option value="db_deadlock">DB Deadlock (2 transactions)</option>
+            <option value="db_slow_query">DB Slow Query (cross join pesado)</option>
+            <option value="db_all">Todos DB + DQ faults</option>
+          </optgroup>
+        </select>
+      </div>
+      <button class="btn btn-primary btn-full" id="btnStart" onclick="startPipeline()">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><polygon points="3,2 14,8 3,14"/></svg>
+        Order &amp; Run Pipeline
+      </button>
+      <div style="margin-top:8px; display:flex; gap:6px;">
+        <button class="btn btn-ghost btn-sm" id="btnClear" onclick="clearConsole()">Limpar Console</button>
+      </div>
+    </div>
+
+    <!-- Job Steps queue -->
+    <div class="sidebar-section" style="flex:1">
+      <div class="sidebar-title" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Steps da Pipeline</span>
+        <button class="btn btn-blue btn-sm" onclick="openAddStep()">+ Add Step</button>
+      </div>
+      <ul class="step-list" id="stepList"></ul>
+
+      <!-- Add step inline form -->
+      <div class="add-step-form" id="addStepForm" style="margin-top:12px;">
+        <div class="sidebar-title">Novo Step</div>
+        <div class="form-group">
+          <label>Nome do Job</label>
+          <input type="text" id="newStepName" placeholder="ex: validate_positions" />
+        </div>
+        <div class="form-group">
+          <label>Descrição</label>
+          <input type="text" id="newStepDesc" placeholder="O que este step faz..." />
+        </div>
+        <div class="form-group">
+          <label>SLA (segundos)</label>
+          <input type="text" id="newStepSla" placeholder="ex: 300" />
+        </div>
+        <div class="form-group">
+          <label>Depende de</label>
+          <select id="newStepDep">
+            <option value="">(nenhuma)</option>
+            <option value="close_market_eod">close_market_eod</option>
+            <option value="reconcile_d1_positions">reconcile_d1_positions</option>
+            <option value="quality_gate_d1">quality_gate_d1</option>
+            <option value="publish_d1_reports">publish_d1_reports</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-blue btn-sm" onclick="confirmAddStep()">Adicionar</button>
+          <button class="btn btn-ghost btn-sm" onclick="cancelAddStep()">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Selected job edit panel -->
+    <div class="sidebar-section job-edit-panel" id="jobEditPanel" style="display:none">
+      <div class="job-edit-header">
+        <div class="step-dot step-dot-wait" id="editDot"></div>
+        <span class="job-edit-name" id="editJobName">—</span>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="closeEditPanel()">✕</button>
+      </div>
+      <div class="job-edit-desc" id="editJobDesc">—</div>
+      <div class="job-edit-fields">
+        <div class="form-group">
+          <label>Date Override (deixe vazio p/ usar ODATE global)</label>
+          <input type="date" id="editDateOverride" />
+        </div>
+        <div class="form-group">
+          <label>Injetar Falha neste job específico</label>
+          <select id="editFault">
+            <option value="">— Nenhuma —</option>
+            <option value="duplicate_trades">Caso 1: Duplicatas</option>
+            <option value="null_settlement_price">Caso 2: Nulo</option>
+            <option value="zero_sum_positions">Caso 3: Soma zero</option>
+            <option value="all">Todos os 3 casos</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+          <button class="btn btn-blue btn-sm btn-full" onclick="runSingleJob()">
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><polygon points="3,2 14,8 3,14"/></svg>
+            Run Job
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="saveJobParams()">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end sidebar -->
+
+  <!-- ── MAIN CONTENT ── -->
+  <div class="content">
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <span class="toolbar-label">Pipeline:</span>
+      <span style="font-weight:700;color:var(--blue);font-size:13px;">market_d1_pipeline</span>
+      <div class="toolbar-sep"></div>
+      <span class="toolbar-label">Namespace:</span>
+      <span style="font-size:13px;color:var(--text-muted)">exchange-poc</span>
+      <div class="toolbar-sep"></div>
+      <span class="toolbar-label">Env:</span>
+      <span style="font-size:13px;color:var(--cyan)">demo</span>
+      <div class="toolbar-sep"></div>
+      <span id="toolbarStatus" style="font-size:12px;color:var(--text-muted)">Aguardando ordem...</span>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="resetJobs()">&#x21BA; Reset</button>
+      </div>
+    </div>
+
+    <!-- Job Order Monitor table -->
+    <div class="monitor-wrapper">
+      <table class="monitor-table" id="monitorTable">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Job Name</th>
+            <th>Status</th>
+            <th>Start</th>
+            <th>End</th>
+            <th>Duration</th>
+            <th>SLA</th>
+            <th>Retries</th>
+            <th>Fault</th>
+          </tr>
+        </thead>
+        <tbody id="monitorBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Files exported -->
+    <div class="files-panel" id="filesPanel">
+      <span class="files-label">Arquivos exportados:</span>
+      <span id="filesList"></span>
+    </div>
+
+    <!-- DQ Results inline -->
+    <div class="dq-panel" id="dqPanel">
+      <div class="dq-title">Quality Gate Results</div>
+      <div class="dq-grid" id="dqGrid"></div>
+    </div>
+
+    <!-- Console -->
+    <div class="console-section">
+      <div class="console-header">
+        <div class="console-header-left">
+          <span class="console-dot dot-r"></span>
+          <span class="console-dot dot-y"></span>
+          <span class="console-dot dot-g"></span>
+          <span class="console-title">pipeline output</span>
+        </div>
+        <span style="font-size:11px;color:var(--text-muted)" id="lineCount">0 lines</span>
+      </div>
+      <div class="console-body" id="console"></div>
+    </div>
+
+  </div><!-- end content -->
+</div><!-- end layout -->
+
+<!-- ── ADD STEP MODAL (fallback full modal) ── -->
+<div class="modal-overlay" id="addStepModal">
+  <div class="modal">
+    <div class="modal-title">Add Custom Step</div>
+    <div class="form-group">
+      <label>Job Name</label>
+      <input type="text" id="modalStepName" placeholder="ex: validate_cash_positions" />
+    </div>
+    <div class="form-group">
+      <label>Command / Script</label>
+      <textarea id="modalStepCmd" placeholder="python /jobs/my_job.py --date %%ODATE%%"></textarea>
+    </div>
+    <div class="form-group">
+      <label>SLA (seconds)</label>
+      <input type="text" id="modalStepSla" placeholder="300" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-blue" onclick="confirmModalStep()">Add Step</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ────────────────────────────────────────────────────────── */
+/*  STATE                                                      */
+/* ────────────────────────────────────────────────────────── */
+
+const JOB_DEFS = [
+  { id:'close_market_eod',         label:'close_market_eod',          dep:null,                          sla:600,  desc:'ETL: Oracle ASTADRVT_TRADE_MVMT → SQL Server ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO' },
+  { id:'reconcile_d1_positions',   label:'reconcile_d1_positions',    dep:'close_market_eod',            sla:900,  desc:'ETL: Oracle ASTANO/ASTACASH → SQL Server ADWPM_POSICAO_*' },
+  { id:'quality_gate_d1',          label:'quality_gate_d1',           dep:'reconcile_d1_positions',      sla:300,  desc:'DQ: 5 checks (duplicatas, nulos, soma-zero, row-count, overflow) → ADWPM_DQ_RESULTS' },
+  { id:'publish_d1_reports',       label:'publish_d1_reports',        dep:'quality_gate_d1',             sla:600,  desc:'Export: SQL Server DW → MinIO Parquet/CSV' },
+];
+
+let jobs = {};         // { id: { status, start, end, retries, sla_miss, fault, result } }
+let selectedJob = null;
+let jobOverrides = {}; // { id: { fault, date } }
+let lineCount = 0;
+let eventSource = null;
+let pipelineRunning = false;
+
+/* ────────────────────────────────────────────────────────── */
+/*  INIT                                                       */
+/* ────────────────────────────────────────────────────────── */
+
+document.getElementById('businessDate').value = new Date().toISOString().split('T')[0];
+
+function initJobs() {
+  jobs = {};
+  JOB_DEFS.forEach(j => {
+    jobs[j.id] = { status:'WAITING', start:null, end:null, retries:0, sla_miss:false, fault:null, result:null };
+  });
+  renderStepList();
+  renderMonitorTable();
+}
+
+initJobs();
+connectSSE();
+
+/* ────────────────────────────────────────────────────────── */
+/*  RENDER STEP LIST (sidebar)                                 */
+/* ────────────────────────────────────────────────────────── */
+
+function renderStepList() {
+  const el = document.getElementById('stepList');
+  el.innerHTML = '';
+  JOB_DEFS.forEach(j => {
+    const st = jobs[j.id] || {};
+    const dotClass = { 'WAITING':'step-dot-wait', 'RUNNING':'step-dot-run', 'ENDED OK':'step-dot-ok', 'ENDED NOT OK':'step-dot-fail' }[st.status] || 'step-dot-wait';
+    const li = document.createElement('li');
+    li.className = 'step-item' + (selectedJob === j.id ? ' selected' : '');
+    li.innerHTML = `<span class="step-dot ${dotClass}"></span>
+      <span class="step-name">${j.label}</span>
+      <span class="step-sla">${j.sla}s SLA</span>`;
+    li.onclick = () => selectJob(j.id);
+    el.appendChild(li);
+  });
+}
+
+/* ────────────────────────────────────────────────────────── */
+/*  RENDER MONITOR TABLE                                       */
+/* ────────────────────────────────────────────────────────── */
+
+function renderMonitorTable() {
+  const tbody = document.getElementById('monitorBody');
+  tbody.innerHTML = '';
+
+  JOB_DEFS.forEach((j, idx) => {
+    const st = jobs[j.id] || {};
+    const ov = jobOverrides[j.id] || {};
+    const fault = ov.fault || st.fault || '';
+
+    const statusChip = makeChip(st.status);
+    const slaChip = st.sla_miss ? '<span class="chip chip-sla">SLA MISS</span>' : (st.status==='ENDED OK' ? '<span style="color:var(--green);font-size:12px;font-weight:600">OK</span>' : '<span style="color:var(--text-muted);font-size:12px;">—</span>');
+
+    const tr = document.createElement('tr');
+    tr.className = selectedJob === j.id ? 'selected-row' : '';
+    tr.innerHTML = `
+      <td class="job-order-num">${String(idx+1).padStart(2,'0')}</td>
+      <td>
+        <div class="job-name-cell">${j.label}${fault ? `<span class="fault-tag">${fault}</span>` : ''}</div>
+        <div class="job-dep">${j.dep ? '↳ depends: '+j.dep : '─ pipeline start'}</div>
+      </td>
+      <td>${statusChip}</td>
+      <td class="mono" style="font-size:12px;color:var(--text-muted)">${st.start || '—'}</td>
+      <td class="mono" style="font-size:12px;color:var(--text-muted)">${st.end || '—'}</td>
+      <td class="mono" style="font-size:12px">${st.duration != null ? st.duration+'s' : '—'}</td>
+      <td>${slaChip}</td>
+      <td style="font-size:12px;text-align:center">${st.retries || 0}</td>
+      <td style="font-size:11px;color:var(--yellow)">${fault || '—'}</td>
+    `;
+    tr.onclick = () => selectJob(j.id);
+    tbody.appendChild(tr);
+  });
+}
+
+function makeChip(status) {
+  const map = {
+    'WAITING':    `<span class="chip chip-wait"><span class="chip-dot" style="background:var(--gray)"></span>Waiting</span>`,
+    'RUNNING':    `<span class="chip chip-run"><span class="chip-dot" style="background:var(--blue)"></span>Running</span>`,
+    'ENDED OK':   `<span class="chip chip-ok"><span class="chip-dot" style="background:var(--green)"></span>Ended OK</span>`,
+    'ENDED NOT OK':`<span class="chip chip-fail"><span class="chip-dot" style="background:var(--red)"></span>Ended NOT OK</span>`,
+  };
+  return map[status] || `<span class="chip chip-wait">${status}</span>`;
+}
+
+/* ────────────────────────────────────────────────────────── */
+/*  SELECT JOB → edit panel                                    */
+/* ────────────────────────────────────────────────────────── */
+
+function selectJob(id) {
+  selectedJob = id;
+  const def = JOB_DEFS.find(j => j.id === id);
+  const ov  = jobOverrides[id] || {};
+  const st  = jobs[id] || {};
+
+  // Update sidebar selection
+  renderStepList();
+  renderMonitorTable();
+
+  // Show edit panel
+  document.getElementById('jobEditPanel').style.display = 'block';
+  document.getElementById('editJobName').textContent = def.label;
+  document.getElementById('editJobDesc').textContent = def.desc;
+  document.getElementById('editDateOverride').value = ov.date || '';
+  document.getElementById('editFault').value = ov.fault || '';
+
+  // Dot color
+  const dotClass = { 'WAITING':'var(--gray)', 'RUNNING':'var(--blue)', 'ENDED OK':'var(--green)', 'ENDED NOT OK':'var(--red)' }[st.status] || 'var(--gray)';
+  document.getElementById('editDot').style.background = dotClass;
+}
+
+function closeEditPanel() {
+  selectedJob = null;
+  document.getElementById('jobEditPanel').style.display = 'none';
+  renderStepList();
+  renderMonitorTable();
+}
+
+function saveJobParams() {
+  if (!selectedJob) return;
+  jobOverrides[selectedJob] = {
+    date:  document.getElementById('editDateOverride').value || null,
+    fault: document.getElementById('editFault').value || null,
+  };
+  renderMonitorTable();
+  log('info', `[CTM] Job ${selectedJob} — parâmetros salvos`);
+}
+
+function runSingleJob() {
+  if (!selectedJob) return;
+  saveJobParams();
+  const date = jobOverrides[selectedJob]?.date || document.getElementById('businessDate').value;
+  const fault = jobOverrides[selectedJob]?.fault || null;
+
+  log('job-start', `[CTM] Disparando job individual: ${selectedJob}`);
+
+  fetch(`/api/run/${selectedJob}`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ business_date: date, inject_fault: fault }),
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.error) log('error', `[CTM] Erro: ${d.error}`);
+  })
+  .catch(err => log('error', `[CTM] Falha ao disparar: ${err}`));
+}
+
+/* ────────────────────────────────────────────────────────── */
+/*  ADD STEP                                                   */
+/* ────────────────────────────────────────────────────────── */
+
+function openAddStep() {
+  const form = document.getElementById('addStepForm');
+  form.classList.toggle('visible');
+}
+function cancelAddStep() {
+  document.getElementById('addStepForm').classList.remove('visible');
+}
+function confirmAddStep() {
+  const name = document.getElementById('newStepName').value.trim();
+  if (!name) { alert('Nome obrigatório'); return; }
+  const desc = document.getElementById('newStepDesc').value.trim() || 'Custom step';
+  const sla  = parseInt(document.getElementById('newStepSla').value) || 300;
+  const dep  = document.getElementById('newStepDep').value || null;
+
+  JOB_DEFS.push({ id: name, label: name, dep, sla, desc });
+  jobs[name] = { status:'WAITING', start:null, end:null, retries:0, sla_miss:false, fault:null, result:null };
+
+  cancelAddStep();
+  renderStepList();
+  renderMonitorTable();
+  log('info', `[CTM] Step adicionado: ${name}`);
+}
+
+function openModal() { document.getElementById('addStepModal').classList.add('visible'); }
+function closeModal() { document.getElementById('addStepModal').classList.remove('visible'); }
+function confirmModalStep() {
+  const name = document.getElementById('modalStepName').value.trim();
+  if (!name) { alert('Nome obrigatório'); return; }
+  JOB_DEFS.push({ id: name, label: name, dep: null, sla: parseInt(document.getElementById('modalStepSla').value)||300, desc: document.getElementById('modalStepCmd').value });
+  jobs[name] = { status:'WAITING', start:null, end:null, retries:0, sla_miss:false, fault:null, result:null };
+  closeModal();
+  renderStepList();
+  renderMonitorTable();
+  log('info', `[CTM] Step adicionado: ${name}`);
+}
+
+/* ────────────────────────────────────────────────────────── */
+/*  PIPELINE RUN                                               */
+/* ────────────────────────────────────────────────────────── */
+
+function startPipeline() {
+  const bd    = document.getElementById('businessDate').value;
+  const fault = document.getElementById('faultType').value;
+  if (!bd) { alert('Selecione a data de negócio.'); return; }
+
+  pipelineRunning = true;
+  initJobs();
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('dqPanel').classList.remove('visible');
+  document.getElementById('filesPanel').classList.remove('visible');
+  setBadge('run', 'Running...');
+  document.getElementById('toolbarStatus').textContent = `Pipeline ordenada — ${bd}`;
+
+  fetch('/api/run', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ business_date: bd, inject_fault: fault || null }),
+  })
+  .then(r => r.json())
+  .then(d => { if (d.error) { alert(d.error); resetUI(); } })
+  .catch(err => { alert('Erro: '+err); resetUI(); });
+}
+
+function resetUI() {
+  document.getElementById('btnStart').disabled = false;
+  setBadge('idle', 'Idle');
+  pipelineRunning = false;
+}
+
+function resetJobs() {
+  initJobs();
+  document.getElementById('dqPanel').classList.remove('visible');
+  document.getElementById('filesPanel').classList.remove('visible');
+  setBadge('idle', 'Idle');
+  document.getElementById('toolbarStatus').textContent = 'Aguardando ordem...';
+}
+
+/* ────────────────────────────────────────────────────────── */
+/*  SSE                                                        */
+/* ────────────────────────────────────────────────────────── */
+
+function connectSSE() {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource('/api/stream');
+
+  eventSource.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    handleSSE(data);
+  };
+  eventSource.onerror = () => setTimeout(connectSSE, 2000);
+}
+
+function handleSSE(data) {
+  appendLog(data);
+
+  // Job-level updates from SSE
+  if (data.type === 'job-start' && data.job) {
+    updateJobStatus(data.job, 'RUNNING', data.timestamp, null, 0, false);
+  }
+  if ((data.type === 'success' || data.type === 'info') && data.job && data.finished) {
+    const ok = data.job_status === 'success';
+    updateJobStatus(data.job, ok ? 'ENDED OK' : 'ENDED NOT OK', null, data.timestamp, data.retries||0, data.sla_miss||false, data.duration_seconds, data.result);
+  }
+
+  // Pipeline-level
+  if (data.type === 'pipeline-complete') {
+    setBadge('ok', 'Ended OK');
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('toolbarStatus').textContent = `Pipeline concluída — ${data.result?.duration_seconds||'?'}s`;
+    pipelineRunning = false;
+    applyPipelineResult(data.result, true);
+  }
+  if (data.type === 'pipeline-failed') {
+    setBadge('fail', 'Failed');
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('toolbarStatus').textContent = `Pipeline FALHOU`;
+    pipelineRunning = false;
+    applyPipelineResult(data.result, false);
+  }
+}
+
+function updateJobStatus(jobId, status, start, end, retries, sla_miss, duration, result) {
+  if (!jobs[jobId]) jobs[jobId] = { status:'WAITING', start:null, end:null, retries:0, sla_miss:false };
+  if (status) jobs[jobId].status = status;
+  if (start)  jobs[jobId].start  = fmtTime(start);
+  if (end)    jobs[jobId].end    = fmtTime(end);
+  if (retries != null) jobs[jobId].retries = retries;
+  if (sla_miss != null) jobs[jobId].sla_miss = sla_miss;
+  if (duration != null) jobs[jobId].duration = duration;
+  if (result)  jobs[jobId].result = result;
+
+  renderStepList();
+  renderMonitorTable();
+}
+
+function applyPipelineResult(result, success) {
+  if (!result || !result.jobs) return;
+
+  for (const [name, job] of Object.entries(result.jobs)) {
+    updateJobStatus(
+      name,
+      job.status === 'success' ? 'ENDED OK' : 'ENDED NOT OK',
+      null, null,
+      job.retries || 0,
+      job.sla_miss || false,
+      job.duration_seconds,
+      job.result
+    );
+  }
+
+  // Quality gate
+  const qg = result.jobs?.quality_gate_d1?.result;
+  if (qg) showDQPanel(qg);
+
+  // Files
+  const pub = result.jobs?.publish_d1_reports?.result;
+  if (pub?.files_exported?.length) showFilesPanel(pub.files_exported);
+}
+
+/* ────────────────────────────────────────────────────────── */
+/*  DQ PANEL                                                   */
+/* ────────────────────────────────────────────────────────── */
+
+function showDQPanel(qg) {
+  const panel = document.getElementById('dqPanel');
+  const grid  = document.getElementById('dqGrid');
+  panel.classList.add('visible');
+
+  const gateClass = qg.gate_status === 'PASS' ? 'dq-val-pass' : 'dq-val-fail';
+  grid.innerHTML = `
+    <div class="dq-card">
+      <div class="dq-card-label">Gate Status</div>
+      <div class="dq-card-val ${gateClass}">${qg.gate_status}</div>
+    </div>
+    <div class="dq-card">
+      <div class="dq-card-label">Checks Run</div>
+      <div class="dq-card-val">${qg.checks_run}</div>
+    </div>
+    <div class="dq-card">
+      <div class="dq-card-label">Checks Failed</div>
+      <div class="dq-card-val ${qg.checks_failed > 0 ? 'dq-val-fail' : 'dq-val-pass'}">${qg.checks_failed}</div>
+    </div>
+    <div class="dq-card">
+      <div class="dq-card-label">Critical Failures</div>
+      <div class="dq-card-val ${qg.critical_failures > 0 ? 'dq-val-fail' : 'dq-val-pass'}">${qg.critical_failures}</div>
+    </div>
+  `;
+}
+
+/* ────────────────────────────────────────────────────────── */
+/*  FILES PANEL                                                */
+/* ────────────────────────────────────────────────────────── */
+
+function showFilesPanel(files) {
+  const panel = document.getElementById('filesPanel');
+  const list  = document.getElementById('filesList');
+  panel.classList.add('visible');
+  list.innerHTML = files.map(f => {
+    const icon = f.endsWith('.parquet') ? '📦' : '📄';
+    return `<span class="file-badge">${icon} ${f}</span>`;
+  }).join(' ');
+}
+
+/* ────────────────────────────────────────────────────────── */
+/*  CONSOLE                                                    */
+/* ────────────────────────────────────────────────────────── */
+
+function appendLog(data) {
+  const line = document.createElement('div');
+  line.className = 'log-line';
+
+  const cls = {
+    'connected':         'log-info',
+    'info':              'log-info',
+    'success':           'log-success',
+    'warn':              'log-warn',
+    'error':             'log-error',
+    'job-start':         'log-job-start',
+    'pipeline-complete': 'log-pipe-ok',
+    'pipeline-failed':   'log-pipe-fail',
+  }[data.type] || 'log-info';
+
+  line.innerHTML = `<span class="log-ts">${data.timestamp}</span> <span class="${cls}">${escHtml(data.text)}</span>`;
+  const con = document.getElementById('console');
+  con.appendChild(line);
+  con.scrollTop = con.scrollHeight;
+  lineCount++;
+  document.getElementById('lineCount').textContent = `${lineCount} lines`;
+}
+
+function log(type, text) {
+  appendLog({ type, text, timestamp: new Date().toTimeString().slice(0,8) });
+}
+
+function clearConsole() {
+  document.getElementById('console').innerHTML = '';
+  lineCount = 0;
+  document.getElementById('lineCount').textContent = '0 lines';
+}
+
+/* ────────────────────────────────────────────────────────── */
+/*  HELPERS                                                    */
+/* ────────────────────────────────────────────────────────── */
+
+function setBadge(type, text) {
+  const el = document.getElementById('pipelineBadge');
+  el.className = 'pipeline-badge badge-' + type;
+  el.textContent = text;
+}
+
+function fmtTime(iso) {
+  if (!iso) return null;
+  try { return new Date(iso).toTimeString().slice(0,8); }
+  catch { return iso; }
+}
+
+function escHtml(text) {
+  const el = document.createElement('span');
+  el.textContent = text;
+  return el.innerHTML;
+}
+</script>
+</body>
+</html>

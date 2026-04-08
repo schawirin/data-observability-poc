@@ -1,0 +1,18 @@
+init_config:
+
+instances:
+  - host: demo-mysql
+    port: 3306
+    username: datadog
+    password: datadog
+    dbm: true
+    reported_hostname: demo-mysql
+    tags:
+      - env:demo
+      - team:data-platform
+      - domain:capital-markets
+    options:
+      replication: false
+      extra_status_metrics: true
+      extra_innodb_metrics: true
+      schema_size_metrics: true

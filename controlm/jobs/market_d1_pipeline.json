@@ -1,0 +1,74 @@
+{
+  "Market_D1_Pipeline": {
+    "Type": "SimpleFolder",
+    "Comment": "Data Pipeline POC - Market D+1 pipeline. Deploy via: ctm deploy code market_d1_pipeline.json *",
+
+    "Market_close_market_eod": {
+      "Type": "Job:Script",
+      "Host": "workbench",
+      "RunAs": "workbench",
+      "FileName": "run_job.py",
+      "FilePath": "/scripts",
+      "Arguments": "--job close_market_eod --date %%ODATE%%",
+      "Command": "python /scripts/run_job.py --job close_market_eod --date %%ODATE%%",
+      "Description": "EOD market close — consolidates book, calculates closing prices and VWAP",
+      "SLA": {
+        "Duration": "00:10"
+      },
+      "Variables": [
+        {"Name": "%%ODATE%%", "Value": "ODATE"}
+      ]
+    },
+
+    "Market_reconcile_d1_positions": {
+      "Type": "Job:Script",
+      "Host": "workbench",
+      "RunAs": "workbench",
+      "FileName": "run_job.py",
+      "FilePath": "/scripts",
+      "Arguments": "--job reconcile_d1_positions --date %%ODATE%%",
+      "Command": "python /scripts/run_job.py --job reconcile_d1_positions --date %%ODATE%%",
+      "Description": "D+1 reconciliation — matches trades to settlement instructions and participant positions",
+      "SLA": {
+        "Duration": "00:15"
+      },
+      "DependsOn": [
+        {"Name": "Market_close_market_eod", "State": "OK"}
+      ]
+    },
+
+    "Market_quality_gate_d1": {
+      "Type": "Job:Script",
+      "Host": "workbench",
+      "RunAs": "workbench",
+      "FileName": "run_job.py",
+      "FilePath": "/scripts",
+      "Arguments": "--job quality_gate_d1 --date %%ODATE%%",
+      "Command": "python /scripts/run_job.py --job quality_gate_d1 --date %%ODATE%%",
+      "Description": "D+1 quality gate — validates completeness, uniqueness, consistency, reasonableness, timeliness",
+      "SLA": {
+        "Duration": "00:05"
+      },
+      "DependsOn": [
+        {"Name": "Market_reconcile_d1_positions", "State": "OK"}
+      ]
+    },
+
+    "Market_publish_d1_reports": {
+      "Type": "Job:Script",
+      "Host": "workbench",
+      "RunAs": "workbench",
+      "FileName": "run_job.py",
+      "FilePath": "/scripts",
+      "Arguments": "--job publish_d1_reports --date %%ODATE%%",
+      "Command": "python /scripts/run_job.py --job publish_d1_reports --date %%ODATE%%",
+      "Description": "D+1 publish — generates curated reports and exports CSV/Parquet to S3/MinIO",
+      "SLA": {
+        "Duration": "00:10"
+      },
+      "DependsOn": [
+        {"Name": "Market_quality_gate_d1", "State": "OK"}
+      ]
+    }
+  }
+}

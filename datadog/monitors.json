@@ -1,0 +1,119 @@
+{
+  "monitors": [
+    {
+      "name": "DQ - Duplicate Derivatives Trades [Caso 1]",
+      "type": "log alert",
+      "query": "logs(\"service:pipeline-runner \\\"DQ-CASO-1\\\" \\\"Duplicatas\\\"\").rollup(\"count\").last(\"5m\") > 0",
+      "message": "CRITICAL: Duplicatas detectadas em ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO.\nOrigem: ASTADRVT_TRADE_MVMT.\n{{value}} linhas duplicadas para a data de negócio.\n\nAção: Verificar ETL close_market_eod e tabela origem no Oracle.\nRunbook: https://wiki.example.com/dq/caso1\n\n@data-team@example.com",
+      "tags": ["env:demo", "team:data-platform", "dq-case:1", "table:ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO", "source:ASTADRVT_TRADE_MVMT"],
+      "options": {
+        "notify_audit": false,
+        "locked": false,
+        "timeout_h": 0,
+        "silenced": {},
+        "include_tags": true,
+        "thresholds": {
+          "critical": 1
+        },
+        "new_host_delay": 300,
+        "require_full_window": false,
+        "notify_no_data": false,
+        "renotify_interval": 60,
+        "escalation_message": "ESCALAÇÃO: Duplicatas em ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO não resolvidas após 60 minutos. Acionar engenharia de dados."
+      },
+      "priority": 1
+    },
+    {
+      "name": "DQ - Null Settlement Price [Caso 2]",
+      "type": "log alert",
+      "query": "logs(\"service:pipeline-runner \\\"DQ-CASO-2\\\" \\\"Coluna nula\\\"\").rollup(\"count\").last(\"5m\") > 0",
+      "message": "CRITICAL: Coluna settlement_price com valor NULL detectada.\nTabela DW: ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL.\nOrigem: ASTANO_FGBE_DRVT_PSTN.\n\n{{value}} linhas afetadas para a data de posição.\n\nAção: Verificar pipeline reconcile_d1_positions e dados de origem Oracle.\nRunbook: https://wiki.example.com/dq/caso2\n\n@data-team@example.com",
+      "tags": ["env:demo", "team:data-platform", "dq-case:2", "table:ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL", "source:ASTANO_FGBE_DRVT_PSTN"],
+      "options": {
+        "notify_audit": false,
+        "locked": false,
+        "timeout_h": 0,
+        "silenced": {},
+        "include_tags": true,
+        "thresholds": {
+          "critical": 1
+        },
+        "new_host_delay": 300,
+        "require_full_window": false,
+        "notify_no_data": false,
+        "renotify_interval": 60,
+        "escalation_message": "ESCALAÇÃO: settlement_price nulo em ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL não resolvido após 60 minutos."
+      },
+      "priority": 1
+    },
+    {
+      "name": "DQ - Zero Sum Position [Caso 3]",
+      "type": "log alert",
+      "query": "logs(\"service:pipeline-runner \\\"DQ-CASO-3\\\" \\\"Soma zero\\\"\").rollup(\"count\").last(\"5m\") > 0",
+      "message": "CRITICAL: Posição com long_value + short_value = 0 detectada.\nTabela DW: ADWPM_POSICAO_MERCADO_A_VISTA.\nOrigem: ASTACASH_MRKT_PSTN.\n\n{{value}} linhas com soma zero para a data de posição.\n\nAção: Verificar pipeline reconcile_d1_positions e dados de posição spot.\nRunbook: https://wiki.example.com/dq/caso3\n\n@data-team@example.com",
+      "tags": ["env:demo", "team:data-platform", "dq-case:3", "table:ADWPM_POSICAO_MERCADO_A_VISTA", "source:ASTACASH_MRKT_PSTN"],
+      "options": {
+        "notify_audit": false,
+        "locked": false,
+        "timeout_h": 0,
+        "silenced": {},
+        "include_tags": true,
+        "thresholds": {
+          "critical": 1
+        },
+        "new_host_delay": 300,
+        "require_full_window": false,
+        "notify_no_data": false,
+        "renotify_interval": 60,
+        "escalation_message": "ESCALAÇÃO: Posições zero-sum em ADWPM_POSICAO_MERCADO_A_VISTA não resolvidas após 60 minutos."
+      },
+      "priority": 1
+    },
+    {
+      "name": "DQ - Row Count Difference Oracle vs DW [Caso 4]",
+      "type": "log alert",
+      "query": "logs(\"service:pipeline-runner \\\"DQ-CASO-4\\\" \\\"Diferença de contagem\\\"\").rollup(\"count\").last(\"5m\") > 0",
+      "message": "WARNING: Diferença de quantidade de linhas entre Oracle (origem) e SQL Server DW (destino) > 5%.\n\nTabelas monitoradas:\n- ASTADRVT_TRADE_MVMT vs ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO\n- ASTANO_FGBE_DRVT_PSTN vs ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL\n- ASTACASH_MRKT_PSTN vs ADWPM_POSICAO_MERCADO_A_VISTA\n\nAção: Verificar se houve deleção na origem pós-carga ou falha de ETL parcial.\nRunbook: https://wiki.example.com/dq/caso4\n\n@data-team@example.com",
+      "tags": ["env:demo", "team:data-platform", "dq-case:4", "check-type:row-count"],
+      "options": {
+        "notify_audit": false,
+        "locked": false,
+        "timeout_h": 0,
+        "silenced": {},
+        "include_tags": true,
+        "thresholds": {
+          "critical": 1
+        },
+        "new_host_delay": 300,
+        "require_full_window": false,
+        "notify_no_data": false,
+        "renotify_interval": 120,
+        "escalation_message": "ESCALAÇÃO: Diferença de contagem Oracle vs DW não resolvida após 120 minutos."
+      },
+      "priority": 2
+    },
+    {
+      "name": "DQ - Quality Gate FAIL",
+      "type": "log alert",
+      "query": "logs(\"service:pipeline-runner \\\"GATE STATUS: FAIL\\\"\").rollup(\"count\").last(\"5m\") > 0",
+      "message": "CRITICAL: Quality gate D+1 com status FAIL.\nUm ou mais checks críticos falharam. Publicação de relatórios bloqueada.\n\nVerifique os alertas individuais:\n- DQ - Duplicate Derivatives Trades [Caso 1]\n- DQ - Null Settlement Price [Caso 2]\n- DQ - Zero Sum Position [Caso 3]\n\nConsulte dbo.ADWPM_DQ_RESULTS para detalhes completos.\n\n@data-team@example.com @ops-team@example.com",
+      "tags": ["env:demo", "team:data-platform", "dq-case:gate", "severity:critical"],
+      "options": {
+        "notify_audit": false,
+        "locked": false,
+        "timeout_h": 0,
+        "silenced": {},
+        "include_tags": true,
+        "thresholds": {
+          "critical": 1
+        },
+        "new_host_delay": 300,
+        "require_full_window": false,
+        "notify_no_data": false,
+        "renotify_interval": 30,
+        "escalation_message": "ESCALAÇÃO CRÍTICA: Quality gate D+1 em FAIL. Relatórios não publicados. Acionar gestor de operações."
+      },
+      "priority": 1
+    }
+  ]
+}

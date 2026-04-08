@@ -1,0 +1,218 @@
+init_config:
+
+logs:
+  - type: file
+    path: /var/log/sqlserver/log/errorlog
+    source: sqlserver
+    service: demo-sqlserver
+    log_processing_rules:
+      - type: multi_line
+        name: sqlserver_errorlog
+        pattern: \d{4}-\d{2}-\d{2}
+    tags:
+      - env:demo
+      - team:data-platform
+      - db:sqlserver
+      - db_instance:demopoc
+      - host:demo-sqlserver
+
+instances:
+  # Instance 1: master — server-level metrics + DBM
+  - host: "demo-sqlserver,1433"
+    username: datadog
+    password: "Dd@DemoPoc2026!"
+    database: master
+    connector: odbc
+    driver: "ODBC Driver 18 for SQL Server"
+    dbm: true
+    connection_string: "TrustServerCertificate=yes"
+    query_metrics:
+      enabled: true
+    query_samples:
+      enabled: true
+    tags:
+      - db:sqlserver
+      - env:demo
+      - team:data-platform
+
+  # Instance 2: demopoc — ADWPM* tables + DQ custom metrics
+  - host: "demo-sqlserver,1433"
+    username: datadog
+    password: "Dd@DemoPoc2026!"
+    database: demopoc
+    connector: odbc
+    driver: "ODBC Driver 18 for SQL Server"
+    dbm: true
+    connection_string: "TrustServerCertificate=yes"
+    schemas:
+      enabled: true
+      max_execution_time: 30
+    query_metrics:
+      enabled: true
+    query_samples:
+      enabled: true
+    collect_deadlocks:
+      enabled: true
+    query_activity:
+      enabled: true
+
+    custom_queries:
+
+      # ── DQ Results: checks_run / checks_failed per type and severity ──────────
+      # Permite monitor: exchange.dq.checks_failed > 0 → alerta de qualidade
+      - query: |
+          SELECT
+            check_type,
+            severity,
+            COUNT(*) AS checks_run,
+            SUM(CASE WHEN passed = 0 THEN 1 ELSE 0 END) AS checks_failed
+          FROM dbo.ADWPM_DQ_RESULTS
+          WHERE business_date = CAST(GETDATE() AS DATE)
+          GROUP BY check_type, severity
+        columns:
+          - name: check_type
+            type: tag
+          - name: severity
+            type: tag
+          - name: exchange.dq.checks_run
+            type: gauge
+          - name: exchange.dq.checks_failed
+            type: gauge
+        tags:
+          - db:sqlserver
+          - db_instance:demopoc
+          - env:demo
+
+      # ── Row count: trades carregados no DW hoje ───────────────────────────────
+      # Detecta: job close_market_eod não rodou se == 0 às 08h
+      - query: >
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO
+          WHERE trade_dt = CAST(GETDATE() AS DATE)
+        columns:
+          - name: exchange.dw.trade_movements_loaded
+            type: gauge
+        tags:
+          - db:sqlserver
+          - table:ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO
+          - env:demo
+
+      # ── Row count: posições derivativos carregadas hoje ───────────────────────
+      - query: >
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL
+          WHERE position_date = CAST(GETDATE() AS DATE)
+        columns:
+          - name: exchange.dw.derivative_positions_loaded
+            type: gauge
+        tags:
+          - db:sqlserver
+          - table:ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL
+          - env:demo
+
+      # ── Row count: posições mercado à vista carregadas hoje ───────────────────
+      - query: >
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ADWPM_POSICAO_MERCADO_A_VISTA
+          WHERE position_date = CAST(GETDATE() AS DATE)
+        columns:
+          - name: exchange.dw.market_positions_loaded
+            type: gauge
+        tags:
+          - db:sqlserver
+          - table:ADWPM_POSICAO_MERCADO_A_VISTA
+          - env:demo
+
+      # ── Duplicatas detectadas hoje (Caso 1) ───────────────────────────────────
+      # Alerta direto: exchange.dq.duplicate_trades > 0
+      - query: |
+          SELECT SUM(cnt - 1) AS duplicates
+          FROM (
+            SELECT trade_id, COUNT(*) AS cnt
+            FROM dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO
+            WHERE trade_dt = CAST(GETDATE() AS DATE)
+            GROUP BY trade_id
+            HAVING COUNT(*) > 1
+          ) dup
+        columns:
+          - name: exchange.dq.duplicate_trades
+            type: gauge
+        tags:
+          - db:sqlserver
+          - check:caso_1_duplicates
+          - env:demo
+
+      # ── Nulos settlement_price (Caso 2) ──────────────────────────────────────
+      - query: >
+          SELECT COUNT(*) AS nulls
+          FROM dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL
+          WHERE position_date = CAST(GETDATE() AS DATE)
+            AND settlement_price IS NULL
+        columns:
+          - name: exchange.dq.null_settlement_price
+            type: gauge
+        tags:
+          - db:sqlserver
+          - check:caso_2_nulls
+          - env:demo
+
+      # ── Zero-sum positions (Caso 3) ────────────────────────────────────────
+      # Alerta: exchange.dq.zero_sum_positions > 0
+      - query: >
+          SELECT COUNT(*) AS zero_sum
+          FROM dbo.ADWPM_POSICAO_MERCADO_A_VISTA
+          WHERE position_date = CAST(GETDATE() AS DATE)
+            AND (long_value + short_value) = 0
+        columns:
+          - name: exchange.dq.zero_sum_positions
+            type: gauge
+        tags:
+          - db:sqlserver
+          - check:caso_3_zero_sum
+          - env:demo
+
+      # ── Source vs Destination row count: trades ──────────────────────────────
+      # Compara com exchange.oracle.trade_mvmt_source_count para detectar discrepância
+      - query: >
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO
+          WHERE trade_dt = CAST(GETDATE() AS DATE)
+        columns:
+          - name: exchange.dw.trade_movements_destination_count
+            type: gauge
+        tags:
+          - db:sqlserver
+          - check:rowcount_trades
+          - env:demo
+
+      # ── Source vs Destination row count: derivative positions ────────────────
+      - query: >
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL
+          WHERE position_date = CAST(GETDATE() AS DATE)
+        columns:
+          - name: exchange.dw.derivative_positions_destination_count
+            type: gauge
+        tags:
+          - db:sqlserver
+          - check:rowcount_positions
+          - env:demo
+
+      # ── Source vs Destination row count: cash positions ──────────────────────
+      - query: >
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ADWPM_POSICAO_MERCADO_A_VISTA
+          WHERE position_date = CAST(GETDATE() AS DATE)
+        columns:
+          - name: exchange.dw.cash_positions_destination_count
+            type: gauge
+        tags:
+          - db:sqlserver
+          - check:rowcount_cash
+          - env:demo
+
+    tags:
+      - db:sqlserver
+      - db_instance:demopoc
+      - env:demo
+      - team:data-platform

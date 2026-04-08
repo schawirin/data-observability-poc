@@ -1,0 +1,12 @@
+click
+requests
+mysql-connector-python
+psycopg2-binary
+ddtrace
+datadog
+pandas
+pyarrow
+minio
+flask
+oracledb
+pymssql

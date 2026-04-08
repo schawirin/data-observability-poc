@@ -1,0 +1,5 @@
+mysql-connector-python
+psycopg2-binary
+click
+oracledb
+pymssql

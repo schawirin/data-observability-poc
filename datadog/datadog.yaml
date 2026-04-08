@@ -1,0 +1,13 @@
+# Data Pipeline POC - Datadog Agent config
+# Preserves Docker defaults + adds OpenLineage proxy
+
+dogstatsd_non_local_traffic: true
+
+apm_config:
+  apm_non_local_traffic: true
+
+jmx_use_container_support: true
+
+# OpenLineage proxy for Data Jobs Monitoring
+ol_proxy_config:
+  enabled: true

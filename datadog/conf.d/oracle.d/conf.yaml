@@ -1,0 +1,96 @@
+init_config:
+
+instances:
+  - server: demo-oracle
+    port: 1521
+    service_name: XEPDB1
+    username: demopoc
+    password: OracleDemo123!
+    dbm: false
+    reported_hostname: demo-oracle
+    query_metrics:
+      enabled: false
+    query_samples:
+      enabled: false
+
+    custom_queries:
+
+      # ── Source row count: trades hoje (para comparar com DW) ──────────────
+      # Métrica chave: exchange.oracle.trade_mvmt_source_count
+      # Alerta se diverge de exchange.dw.trade_movements_loaded → discrepância fonte/DW
+      - query: >
+          SELECT COUNT(*) AS cnt
+          FROM DEMOPOC.ASTADRVT_TRADE_MVMT
+          WHERE TRUNC(BUSINESS_DATE) = TRUNC(SYSDATE)
+        columns:
+          - name: exchange.oracle.trade_mvmt_source_count
+            type: gauge
+        tags:
+          - db:oracle
+          - table:ASTADRVT_TRADE_MVMT
+          - env:demo
+
+      # ── Source row count: posições derivativos não-fungíveis ─────────────────
+      - query: >
+          SELECT COUNT(*) AS cnt
+          FROM DEMOPOC.ASTANO_FGBE_DRVT_PSTN
+          WHERE TRUNC(BUSINESS_DATE) = TRUNC(SYSDATE)
+        columns:
+          - name: exchange.oracle.derivative_position_source_count
+            type: gauge
+        tags:
+          - db:oracle
+          - table:ASTANO_FGBE_DRVT_PSTN
+          - env:demo
+
+      # ── Source row count: posições mercado à vista ────────────────────────────
+      - query: >
+          SELECT COUNT(*) AS cnt
+          FROM DEMOPOC.ASTACASH_MRKT_PSTN
+          WHERE TRUNC(BUSINESS_DATE) = TRUNC(SYSDATE)
+        columns:
+          - name: exchange.oracle.cash_position_source_count
+            type: gauge
+        tags:
+          - db:oracle
+          - table:ASTACASH_MRKT_PSTN
+          - env:demo
+
+      # ── Zero-sum positions at source (Caso 3 source-side check) ────────────
+      - query: >
+          SELECT COUNT(*) AS cnt
+          FROM DEMOPOC.ASTACASH_MRKT_PSTN
+          WHERE TRUNC(BUSINESS_DATE) = TRUNC(SYSDATE)
+            AND SETTLEMENT_VALUE = 0
+        columns:
+          - name: exchange.oracle.cash_zero_sum_source_count
+            type: gauge
+        tags:
+          - db:oracle
+          - table:ASTACASH_MRKT_PSTN
+          - check:caso_3_zero_sum_source
+          - env:demo
+
+      # ── Duplicate trade_ids at source (Caso 1 source-side check) ───────────
+      - query: >
+          SELECT NVL(SUM(cnt - 1), 0) AS duplicates
+          FROM (
+            SELECT TRADE_ID, COUNT(*) AS cnt
+            FROM DEMOPOC.ASTADRVT_TRADE_MVMT
+            WHERE TRUNC(BUSINESS_DATE) = TRUNC(SYSDATE)
+            GROUP BY TRADE_ID
+            HAVING COUNT(*) > 1
+          )
+        columns:
+          - name: exchange.oracle.duplicate_trades_source_count
+            type: gauge
+        tags:
+          - db:oracle
+          - table:ASTADRVT_TRADE_MVMT
+          - check:caso_1_duplicates_source
+          - env:demo
+
+    tags:
+      - db:oracle
+      - env:demo
+      - team:data-platform

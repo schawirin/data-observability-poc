@@ -1,0 +1,33 @@
+# Secrets & credentials
+.env
+terraform.tfvars
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Build artifacts
+__pycache__/
+*.pyc
+*.pyo
+target/
+logs/
+dbt-logs-*/
+
+# Binary & media files
+*.pdf
+*.png
+*.jpeg
+*.jpg
+*.xlsx
+*.csv
+
+# IDE & tools
+.claude/
+.vscode/
+.idea/
+
+# Project-specific exclusions
+draw.me/
+etl/
+PLANO-POC-LOCAL-DJM-LINHAGEM-DBM.md
+docs/ec2-deploy.md

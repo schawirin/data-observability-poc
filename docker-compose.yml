@@ -1,0 +1,356 @@
+services:
+  oracle:
+    image: gvenzl/oracle-xe:21-slim
+    container_name: demo-oracle
+    environment:
+      ORACLE_PASSWORD: OracleDemo123!
+      ORACLE_DATABASE: XEPDB1
+      APP_USER: demopoc
+      APP_USER_PASSWORD: OracleDemo123!
+    ports:
+      - "1521:1521"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 30s
+      timeout: 20s
+      retries: 10
+      start_period: 120s
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+      - ./sql/oracle:/container-entrypoint-initdb.d
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"oracle","service":"demo-oracle"}]'
+      com.datadoghq.tags.env: "demo"
+      com.datadoghq.tags.service: "demo-oracle"
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: demo-sqlserver
+    hostname: demo-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "SqlDemo12345!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'SqlDemo12345!' -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"sqlserver","service":"demo-sqlserver"}]'
+      com.datadoghq.tags.env: "demo"
+      com.datadoghq.tags.service: "demo-sqlserver"
+
+  sqlserver-init:
+    image: mcr.microsoft.com/mssql-tools:latest
+    container_name: demo-sqlserver-init
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    volumes:
+      - ./sql/sqlserver:/sql
+    entrypoint: >
+      /bin/bash -c "
+      /opt/mssql-tools/bin/sqlcmd -S demo-sqlserver -U sa -P 'SqlDemo12345!' -i /sql/schema.sql &&
+      echo 'SQL Server schema initialized'
+      "
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: demo-postgres
+    environment:
+      POSTGRES_USER: exchange
+      POSTGRES_PASSWORD: demopoc2026
+      POSTGRES_DB: exchange
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./sql/postgres:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U exchange"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mysql:
+    image: mysql:8.0
+    container_name: demo-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-demopoc2026}
+      MYSQL_DATABASE: exchange
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql/schema:/docker-entrypoint-initdb.d
+      - ./sql/seeds:/seeds
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"mysql","service":"demo-mysql"}]'
+      com.datadoghq.tags.env: "demo"
+      com.datadoghq.tags.service: "demo-mysql"
+    command: >
+      --performance-schema=ON
+      --performance-schema-consumer-events-statements-current=ON
+      --performance-schema-consumer-events-statements-history=ON
+      --performance-schema-consumer-events-statements-history-long=ON
+      --performance-schema-consumer-events-waits-current=ON
+      --performance-schema-consumer-events-waits-history=ON
+      --max-digest-length=4096
+      --performance-schema-max-digest-length=4096
+      --slow-query-log=ON
+      --long-query-time=1
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-demopoc2026}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: demo-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: demo-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/mock-exchange &&
+      mc mb --ignore-existing local/mock-exchange/exports
+      "
+
+  datadog-agent:
+    image: gcr.io/datadoghq/agent:7
+    container_name: demo-datadog-agent
+    environment:
+      DD_API_KEY: ${DD_API_KEY}
+      DD_SITE: ${DD_SITE:-datadoghq.com}
+      DD_ENV: demo
+      DD_TAGS: "team:data-platform domain:capital-markets"
+      DD_APM_ENABLED: "true"
+      DD_APM_NON_LOCAL_TRAFFIC: "true"
+      DD_LOGS_ENABLED: "true"
+      DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL: "true"
+      DD_DBM_ENABLED: "true"
+      DD_PROCESS_AGENT_ENABLED: "true"
+    ports:
+      - "8125:8125/udp"
+      - "8126:8126"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
+      - ./datadog/conf.d:/etc/datadog-agent/conf.d
+      - ./datadog/datadog.yaml:/etc/datadog-agent/datadog.yaml:ro
+      - sqlserver_data:/var/log/sqlserver:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  dbt-runner:
+    build: ./services/dbt-project
+    container_name: demo-dbt-runner
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: exchange
+      POSTGRES_PASSWORD: demopoc2026
+      POSTGRES_DB: exchange
+      OPENLINEAGE_URL: http://datadog-agent:8126
+      OPENLINEAGE_ENDPOINT: openlineage/api/v1/lineage
+      OPENLINEAGE_NAMESPACE: exchange-poc
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"python","service":"dbt-runner"}]'
+      com.datadoghq.tags.env: "demo"
+      com.datadoghq.tags.service: "dbt-runner"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./services/dbt-project:/app
+
+  adminer:
+    image: adminer:latest
+    container_name: demo-adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  market-mock:
+    build: ./services/market-mock
+    container_name: demo-market-mock
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-demopoc2026}
+      MYSQL_DATABASE: exchange
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: exchange
+      POSTGRES_PASSWORD: demopoc2026
+      POSTGRES_DB: exchange
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"python","service":"market-mock"}]'
+      com.datadoghq.tags.env: "demo"
+      com.datadoghq.tags.service: "market-mock"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  pipeline-runner:
+    build: ./services/pipeline-runner
+    container_name: demo-pipeline-runner
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-demopoc2026}
+      MYSQL_DATABASE: exchange
+      DD_AGENT_HOST: datadog-agent
+      DD_TRACE_AGENT_PORT: 8126
+      DD_API_KEY: ${DD_API_KEY}
+      DD_SITE: ${DD_SITE:-datadoghq.com}
+      DD_SERVICE: pipeline-runner
+      DD_ENV: demo
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"python","service":"pipeline-runner"}]'
+      com.datadoghq.tags.env: "demo"
+      com.datadoghq.tags.service: "pipeline-runner"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      datadog-agent:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./services/pipeline-runner:/app
+    command: ["python", "trigger_server.py"]
+    ports:
+      - "5001:5001"
+
+  controlm-sim:
+    build: ./services/controlm-sim
+    container_name: demo-controlm-sim
+    ports:
+      - "5000:5000"
+    environment:
+      # Oracle source
+      ORACLE_HOST: oracle
+      ORACLE_PORT: 1521
+      ORACLE_SERVICE: XEPDB1
+      ORACLE_USER: demopoc
+      ORACLE_PASSWORD: OracleDemo123!
+      # SQL Server destination
+      SQLSERVER_HOST: sqlserver
+      SQLSERVER_PORT: 1433
+      SQLSERVER_USER: sa
+      SQLSERVER_PASSWORD: "SqlDemo12345!"
+      SQLSERVER_DATABASE: demopoc
+      # MySQL (legacy/fallback)
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-demopoc2026}
+      MYSQL_DATABASE: exchange
+      # Postgres
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: exchange
+      POSTGRES_PASSWORD: demopoc2026
+      POSTGRES_DB: exchange
+      # Datadog
+      DD_AGENT_HOST: datadog-agent
+      DD_DOGSTATSD_PORT: 8125
+      DD_TRACE_AGENT_PORT: 8126
+      DD_API_KEY: ${DD_API_KEY}
+      DD_SITE: ${DD_SITE:-datadoghq.com}
+      DD_SERVICE: controlm-sim
+      DD_ENV: demo
+      DD_VERSION: "2.0.0"
+      # MinIO
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"python","service":"controlm-sim"}]'
+      com.datadoghq.tags.env: "demo"
+      com.datadoghq.tags.service: "controlm-sim"
+    depends_on:
+      oracle:
+        condition: service_healthy
+      sqlserver:
+        condition: service_healthy
+      sqlserver-init:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      datadog-agent:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./services/controlm-sim:/app
+      - ./services/pipeline-runner:/app/pipeline-runner
+      - ./services/market-mock:/app/market-mock
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  controlm-workbench:
+    image: registry.hub.docker.com/controlm/workbench:latest
+    platform: linux/amd64
+    container_name: demo-controlm-workbench
+    ports:
+      - "8443:8443"
+    environment:
+      DD_AGENT_HOST: datadog-agent
+      DD_TRACE_AGENT_PORT: "8126"
+      DD_API_KEY: ${DD_API_KEY}
+      DD_SITE: ${DD_SITE:-datadoghq.com}
+      PIPELINE_CONTAINER: demo-pipeline-runner
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"controlm","service":"controlm-workbench"}]'
+      com.datadoghq.tags.env: "demo"
+      com.datadoghq.tags.service: "controlm-workbench"
+    depends_on:
+      datadog-agent:
+        condition: service_started
+      controlm-sim:
+        condition: service_started
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./controlm/scripts:/scripts
+
+volumes:
+  pg_data:
+  mysql_data:
+  minio_data:
+  oracle_data:
+  sqlserver_data:

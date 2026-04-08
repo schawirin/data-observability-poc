@@ -1,0 +1,26 @@
+name: 'market_d1'
+version: '1.0.0'
+config-version: 2
+
+profile: 'exchange'
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  market_d1:
+    raw:
+      +materialized: table
+      +schema: raw
+    staging:
+      +materialized: table
+      +schema: staging
+    curated:
+      +materialized: table
+      +schema: curated
+    quality:
+      +materialized: table
+      +schema: ops

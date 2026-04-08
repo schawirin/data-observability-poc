@@ -1,0 +1,12 @@
+exchange:
+  target: demo
+  outputs:
+    demo:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'postgres') }}"
+      port: 5432
+      user: "{{ env_var('POSTGRES_USER', 'exchange') }}"
+      pass: "{{ env_var('POSTGRES_PASSWORD', 'demopoc2026') }}"
+      dbname: "{{ env_var('POSTGRES_DB', 'exchange') }}"
+      schema: public
+      threads: 4
