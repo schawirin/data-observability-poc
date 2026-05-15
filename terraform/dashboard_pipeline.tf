@@ -1,31 +1,37 @@
 resource "datadog_dashboard_json" "pipeline_d1" {
   dashboard = jsonencode({
-    title       = "Exchange - Pipeline D+1"
-    description = "Monitoring the market D+1 pipeline: job status, duration, SLA, and errors"
+    title       = "Exchange - Control-M Pipeline D+1"
+    description = "Control-M simulator execution metrics emitted through DogStatsD/APM intake: executions, status, duration, retries, SLA, and DQ checks."
     layout_type = "ordered"
-    tags        = ["env:demo", "team:data-platform", "domain:capital-markets"]
+    tags        = ["env:demo", "team:data-platform", "domain:capital-markets", "orchestrator:controlm"]
+
+    template_variables = [
+      {
+        name    = "env"
+        prefix  = "env"
+        default = "demo"
+      },
+      {
+        name    = "ctm_job"
+        prefix  = "ctm_job"
+        default = "*"
+      }
+    ]
 
     widgets = [
-      # Row 1: Summary
       {
         definition = {
-          title = "Pipeline Overview"
-          type  = "group"
+          title       = "Control-M Execution KPIs"
+          type        = "group"
           layout_type = "ordered"
           widgets = [
             {
               definition = {
-                title   = "Job Executions (Last 24h)"
-                type    = "query_value"
+                title = "Job Executions"
+                type  = "query_value"
                 requests = [{
-                  queries = [{
-                    data_source = "logs"
-                    name        = "query1"
-                    search      = { query = "service:controlm-sim @job.status:* env:demo" }
-                    indexes     = ["*"]
-                    compute     = { aggregation = "count" }
-                  }]
-                  formulas = [{ formula = "query1" }]
+                  q          = "sum:controlm.job.executions{env:$env,ctm_job:$ctm_job}.as_count()"
+                  aggregator = "sum"
                 }]
                 autoscale = true
                 precision = 0
@@ -33,17 +39,11 @@ resource "datadog_dashboard_json" "pipeline_d1" {
             },
             {
               definition = {
-                title   = "Failed Jobs (Last 24h)"
-                type    = "query_value"
+                title = "Ended OK"
+                type  = "query_value"
                 requests = [{
-                  queries = [{
-                    data_source = "logs"
-                    name        = "query1"
-                    search      = { query = "service:controlm-sim @job.status:failed env:demo" }
-                    indexes     = ["*"]
-                    compute     = { aggregation = "count" }
-                  }]
-                  formulas = [{ formula = "query1" }]
+                  q          = "sum:controlm.job.ended_ok.count{env:$env,ctm_job:$ctm_job}.as_count()"
+                  aggregator = "sum"
                 }]
                 autoscale = true
                 precision = 0
@@ -51,17 +51,23 @@ resource "datadog_dashboard_json" "pipeline_d1" {
             },
             {
               definition = {
-                title   = "SLA Misses (Last 24h)"
-                type    = "query_value"
+                title = "Ended NOT OK"
+                type  = "query_value"
                 requests = [{
-                  queries = [{
-                    data_source = "logs"
-                    name        = "query1"
-                    search      = { query = "service:controlm-sim @sla_miss:true env:demo" }
-                    indexes     = ["*"]
-                    compute     = { aggregation = "count" }
-                  }]
-                  formulas = [{ formula = "query1" }]
+                  q          = "sum:controlm.job.ended_not_ok.count{env:$env,ctm_job:$ctm_job}.as_count()"
+                  aggregator = "sum"
+                }]
+                autoscale = true
+                precision = 0
+              }
+            },
+            {
+              definition = {
+                title = "SLA Violations"
+                type  = "query_value"
+                requests = [{
+                  q          = "sum:controlm.job.sla.violation.count{env:$env,ctm_job:$ctm_job}.as_count()"
+                  aggregator = "sum"
                 }]
                 autoscale = true
                 precision = 0
@@ -70,51 +76,76 @@ resource "datadog_dashboard_json" "pipeline_d1" {
           ]
         }
       },
-      # Row 2: Job Status Timeline
       {
         definition = {
-          title = "Job Status by Execution"
-          type  = "log_stream"
-          query = "service:controlm-sim @job.status:* env:demo"
-          columns = ["@job.name", "@job.status", "@duration_seconds", "@business_date", "@sla_miss", "@retries"]
-          indexes = ["*"]
-          message_display = "inline"
-          sort = { column = "time", order = "desc" }
-        }
-      },
-      # Row 3: Duration over time
-      {
-        definition = {
-          title = "Job Duration by Name"
+          title = "Duration by Control-M Job"
           type  = "timeseries"
           requests = [{
-            queries = [{
-              data_source = "logs"
-              name        = "query1"
-              search      = { query = "service:controlm-sim @job.status:success env:demo" }
-              indexes     = ["*"]
-              compute     = { aggregation = "avg", metric = "@duration_seconds" }
-              group_by = [{
-                facet = "@job.name"
-                limit = 10
-                sort  = { aggregation = "avg", metric = "@duration_seconds", order = "desc" }
-              }]
-            }]
-            formulas     = [{ formula = "query1" }]
+            q            = "avg:controlm.job.duration_seconds{env:$env,ctm_job:$ctm_job} by {ctm_job}"
+            display_type = "line"
+          }]
+          yaxis = {
+            scale = "linear"
+            label = "seconds"
+          }
+        }
+      },
+      {
+        definition = {
+          title = "Rows Produced by Job"
+          type  = "timeseries"
+          requests = [{
+            q            = "avg:controlm.job.output_rows{env:$env,ctm_job:$ctm_job} by {ctm_job}"
             display_type = "bars"
           }]
         }
       },
-      # Row 4: Errors
       {
         definition = {
-          title = "Recent Errors"
-          type  = "log_stream"
-          query = "service:controlm-sim status:error env:demo"
-          columns = ["@job.name", "@error", "@business_date", "@run_id"]
-          indexes = ["*"]
-          message_display = "expanded-md"
-          sort = { column = "time", order = "desc" }
+          title = "Retries by Job"
+          type  = "toplist"
+          requests = [{
+            q = "max:controlm.job.retries{env:$env,ctm_job:$ctm_job} by {ctm_job}"
+          }]
+        }
+      },
+      {
+        definition = {
+          title = "DQ Checks Failed"
+          type  = "query_value"
+          requests = [{
+            q          = "sum:controlm.dq.checks_failed.count{env:$env}.as_count()"
+            aggregator = "sum"
+          }]
+          autoscale = true
+          precision = 0
+        }
+      },
+      {
+        definition = {
+          title            = "Dashboard Query Notes"
+          type             = "note"
+          content          = <<-EOT
+## Control-M metric queries
+
+Primary custom metric:
+`sum:controlm.job.executions{env:demo,ctm_job:leitura_dados}.as_count()`
+
+APM trace metric generated by the smoke sample:
+`sum:trace.controlm.job.leitura_dados.hits{env:demo}`
+
+Real pipeline span metrics use the actual job names:
+`trace.controlm.job.close_market_eod.hits`,
+`trace.controlm.job.reconcile_d1_positions.hits`,
+`trace.controlm.job.quality_gate_d1.hits`,
+`trace.controlm.job.publish_d1_reports.hits`.
+EOT
+          background_color = "white"
+          font_size        = "14"
+          text_align       = "left"
+          show_tick        = false
+          tick_edge        = "left"
+          tick_pos         = "50%"
         }
       }
     ]

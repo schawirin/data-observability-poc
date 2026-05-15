@@ -1,17 +1,16 @@
 init_config:
 
 instances:
-  - server: demo-oracle
-    port: 1521
+  - server: demo-oracle:1521
     service_name: XEPDB1
-    username: demopoc
-    password: OracleDemo123!
-    dbm: false
+    username: datadog
+    password: DdDemoPoc2026
+    dbm: true
     reported_hostname: demo-oracle
     query_metrics:
-      enabled: false
+      enabled: true
     query_samples:
-      enabled: false
+      enabled: true
 
     custom_queries:
 
@@ -94,3 +93,4 @@ instances:
       - db:oracle
       - env:demo
       - team:data-platform
+      - domain:capital-markets

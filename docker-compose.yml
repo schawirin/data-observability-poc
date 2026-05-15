@@ -1,10 +1,10 @@
 services:
+  # Data sources and targets used by the Control-M simulator.
   oracle:
     image: gvenzl/oracle-xe:21-slim
     container_name: demo-oracle
     environment:
       ORACLE_PASSWORD: OracleDemo123!
-      ORACLE_DATABASE: XEPDB1
       APP_USER: demopoc
       APP_USER_PASSWORD: OracleDemo123!
     ports:
@@ -67,6 +67,16 @@ services:
       POSTGRES_USER: exchange
       POSTGRES_PASSWORD: demopoc2026
       POSTGRES_DB: exchange
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - track_activity_query_size=4096
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - track_io_timing=on
     ports:
       - "5432:5432"
     volumes:
@@ -143,32 +153,31 @@ services:
       "
 
   datadog-agent:
-    image: gcr.io/datadoghq/agent:7
+    build: ./datadog
+    image: b3-datadog-agent:7
     container_name: demo-datadog-agent
     environment:
       DD_API_KEY: ${DD_API_KEY}
       DD_SITE: ${DD_SITE:-datadoghq.com}
       DD_ENV: demo
       DD_TAGS: "team:data-platform domain:capital-markets"
+      DD_HOSTNAME: b3-local-compose
       DD_APM_ENABLED: "true"
       DD_APM_NON_LOCAL_TRAFFIC: "true"
       DD_LOGS_ENABLED: "true"
-      DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL: "true"
+      DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL: "false"
       DD_DBM_ENABLED: "true"
       DD_PROCESS_AGENT_ENABLED: "true"
+      DD_DOGSTATSD_NON_LOCAL_TRAFFIC: "true"
+      DD_DOGSTATSD_TAG_CARDINALITY: orchestrator
+      DD_ENABLE_METADATA_COLLECTION: "true"
     ports:
       - "8125:8125/udp"
       - "8126:8126"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /proc/:/host/proc/:ro
-      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
       - ./datadog/conf.d:/etc/datadog-agent/conf.d
       - ./datadog/datadog.yaml:/etc/datadog-agent/datadog.yaml:ro
       - sqlserver_data:/var/log/sqlserver:ro
-    depends_on:
-      mysql:
-        condition: service_healthy
 
   dbt-runner:
     build: ./services/dbt-project
@@ -235,9 +244,14 @@ services:
       DD_AGENT_HOST: datadog-agent
       DD_TRACE_AGENT_PORT: 8126
       DD_API_KEY: ${DD_API_KEY}
+      DD_APP_KEY: ${DD_APP_KEY:-}
       DD_SITE: ${DD_SITE:-datadoghq.com}
       DD_SERVICE: pipeline-runner
       DD_ENV: demo
+      DD_VERSION: "2.0.0"
+      DD_TRACE_ENABLED: "true"
+      DD_TRACE_AGENT_URL: http://datadog-agent:8126
+      DD_LOGS_INJECTION: "true"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -292,10 +306,19 @@ services:
       DD_DOGSTATSD_PORT: 8125
       DD_TRACE_AGENT_PORT: 8126
       DD_API_KEY: ${DD_API_KEY}
+      DD_APP_KEY: ${DD_APP_KEY:-}
       DD_SITE: ${DD_SITE:-datadoghq.com}
       DD_SERVICE: controlm-sim
       DD_ENV: demo
       DD_VERSION: "2.0.0"
+      DD_TRACE_ENABLED: "true"
+      DD_TRACE_AGENT_URL: http://datadog-agent:8126
+      DD_LOGS_INJECTION: "true"
+      DD_RUNTIME_METRICS_ENABLED: "true"
+      CTM_SERVER: demo-poc-ctm
+      CTM_APPLICATION: exchange-data-platform
+      CTM_SUB_APPLICATION: derivatives
+      CTM_HOST: controlm-sim
       # MinIO
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
@@ -321,9 +344,9 @@ services:
       - ./services/controlm-sim:/app
       - ./services/pipeline-runner:/app/pipeline-runner
       - ./services/market-mock:/app/market-mock
-      - /var/run/docker.sock:/var/run/docker.sock
 
   controlm-workbench:
+    profiles: ["workbench"]
     image: registry.hub.docker.com/controlm/workbench:latest
     platform: linux/amd64
     container_name: demo-controlm-workbench

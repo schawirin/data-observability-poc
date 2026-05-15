@@ -1,9 +1,12 @@
 .PHONY: up down seed run-eod run-d1 inject-fault demo-happy demo-fail logs status clean \
         ctm-deploy ctm-run-d1 ctm-run-eod ctm-status ctm-login \
-        demo-caso1 demo-caso2 demo-caso3 demo-overflow demo-row-count-diff
+        demo-caso1 demo-caso2 demo-caso3 demo-overflow demo-row-count-diff \
+        up-workbench dd-agent-status dd-smoke
 
 # Default business date: today
 BUSINESS_DATE ?= $(shell date +%Y-%m-%d)
+COMPOSE ?= podman compose
+CONTAINER ?= podman
 
 # ─── Control-M Workbench settings ───────────────────────────────
 CTM_HOST ?= localhost
@@ -15,31 +18,47 @@ CTM_BASE  = https://$(CTM_HOST):$(CTM_PORT)/automation-api
 # ─── Infrastructure ──────────────────────────────────────────────
 up:
 	@echo "▶ Starting Data Pipeline POC stack..."
-	docker compose up -d --build
-	@echo "✓ Stack is up. MySQL: localhost:3306 | MinIO: localhost:9001 | Adminer: localhost:8080"
+	$(COMPOSE) up -d --build
+	@echo "✓ Stack is up. Control-M Sim: localhost:5000 | MinIO: localhost:9001 | Adminer: localhost:8080"
+
+up-workbench:
+	@echo "▶ Starting optional Control-M Workbench profile..."
+	$(COMPOSE) --profile workbench up -d --build controlm-workbench
 
 down:
-	docker compose down
+	$(COMPOSE) down
 
 clean:
-	docker compose down -v
+	$(COMPOSE) down -v
 	@echo "✓ Volumes removed"
 
 status:
-	docker compose ps
+	$(COMPOSE) ps
 
 logs:
-	docker compose logs -f --tail=50
+	$(COMPOSE) logs -f --tail=50
+
+dd-agent-status:
+	$(CONTAINER) exec demo-datadog-agent agent status
+
+dd-smoke:
+	@echo "▶ Emitting one Control-M metric/APM smoke sample..."
+	$(COMPOSE) up -d --build datadog-agent
+	@until $(CONTAINER) exec demo-datadog-agent agent health >/dev/null 2>&1; do sleep 2; done
+	$(COMPOSE) build controlm-sim
+	$(COMPOSE) run --rm --no-deps controlm-sim python main.py emit-smoke-metrics --business-date $(BUSINESS_DATE)
+	@echo "✓ Check Datadog metric: sum:controlm.job.executions{env:demo,ctm_job:leitura_dados}.as_count()"
+	@echo "✓ Existing trace widget can use: sum:trace.controlm.job.leitura_dados.hits{env:demo}"
 
 # ─── Data ────────────────────────────────────────────────────────
 seed:
 	@echo "▶ Seeding reference data..."
-	docker exec demo-mysql mysql -u root -p$${MYSQL_ROOT_PASSWORD:-demopoc2026} exchange < sql/seeds/seed_participants.sql
+	$(CONTAINER) exec -i demo-mysql mysql -u root -p$${MYSQL_ROOT_PASSWORD:-demopoc2026} exchange < sql/seeds/seed_participants.sql
 	@echo "✓ Seed complete"
 
 generate-day:
 	@echo "▶ Generating market data for $(BUSINESS_DATE)..."
-	docker exec demo-market-mock python main.py generate-day --business-date $(BUSINESS_DATE)
+	$(CONTAINER) exec demo-market-mock python main.py generate-day --business-date $(BUSINESS_DATE)
 	@echo "✓ Market data generated"
 
 # ─── Control-M Automation API ───────────────────────────────────
@@ -88,18 +107,20 @@ ctm-status:
 	  | python3 -m json.tool
 
 # ─── Pipeline Execution ─────────────────────────────────────────
-run-eod: ctm-run-eod
+run-eod:
+	$(CONTAINER) exec demo-controlm-sim python main.py run-job --job-name close_market_eod --business-date $(BUSINESS_DATE)
 
-run-d1: ctm-run-d1
+run-d1:
+	$(CONTAINER) exec demo-controlm-sim python main.py run-pipeline --business-date $(BUSINESS_DATE)
 
 run-job:
 	@echo "▶ Running job $(JOB) for $(BUSINESS_DATE) via wrapper..."
-	docker exec demo-controlm-workbench python /scripts/run_job.py --job $(JOB) --date $(BUSINESS_DATE)
+	$(CONTAINER) exec demo-controlm-sim python main.py run-job --job-name $(JOB) --business-date $(BUSINESS_DATE)
 
 # ─── Fault Injection ────────────────────────────────────────────
 inject-fault:
 	@echo "▶ Injecting fault: $(FAULT) for $(BUSINESS_DATE)..."
-	docker exec demo-market-mock python main.py inject-fault --fault-type $(FAULT) --business-date $(BUSINESS_DATE)
+	$(CONTAINER) exec demo-market-mock python main.py inject-fault --fault-type $(FAULT) --business-date $(BUSINESS_DATE)
 
 inject-duplicates:
 	$(MAKE) inject-fault FAULT=duplicate_trade_id

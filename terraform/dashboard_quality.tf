@@ -15,8 +15,8 @@ resource "datadog_dashboard_json" "data_quality" {
           widgets = [
             {
               definition = {
-                title   = "Gate Status (Last Run)"
-                type    = "query_value"
+                title = "Gate Status (Last Run)"
+                type  = "query_value"
                 requests = [{
                   queries = [{
                     data_source = "logs"
@@ -33,8 +33,8 @@ resource "datadog_dashboard_json" "data_quality" {
             },
             {
               definition = {
-                title   = "Critical Failures"
-                type    = "query_value"
+                title = "Critical Failures"
+                type  = "query_value"
                 requests = [{
                   queries = [{
                     data_source = "logs"
@@ -51,8 +51,8 @@ resource "datadog_dashboard_json" "data_quality" {
             },
             {
               definition = {
-                title   = "Checks Passed Rate"
-                type    = "query_value"
+                title = "Checks Passed Rate"
+                type  = "query_value"
                 requests = [{
                   queries = [{
                     data_source = "logs"
@@ -60,18 +60,18 @@ resource "datadog_dashboard_json" "data_quality" {
                     search      = { query = "service:controlm-sim @job.name:quality_gate_d1 env:demo" }
                     indexes     = ["*"]
                     compute     = { aggregation = "avg", metric = "@checks_run" }
-                  },
-                  {
-                    data_source = "logs"
-                    name        = "failed"
-                    search      = { query = "service:controlm-sim @job.name:quality_gate_d1 env:demo" }
-                    indexes     = ["*"]
-                    compute     = { aggregation = "avg", metric = "@checks_failed" }
+                    },
+                    {
+                      data_source = "logs"
+                      name        = "failed"
+                      search      = { query = "service:controlm-sim @job.name:quality_gate_d1 env:demo" }
+                      indexes     = ["*"]
+                      compute     = { aggregation = "avg", metric = "@checks_failed" }
                   }]
                   formulas = [{ formula = "((total - failed) / total) * 100" }]
                 }]
-                autoscale = true
-                precision = 1
+                autoscale   = true
+                precision   = 1
                 custom_unit = "%"
               }
             }
@@ -81,13 +81,13 @@ resource "datadog_dashboard_json" "data_quality" {
       # Row 2: Quality Results Detail
       {
         definition = {
-          title = "Quality Check Results (Last Runs)"
-          type  = "log_stream"
-          query = "service:pipeline-runner @check_name:* env:demo"
-          columns = ["@check_name", "@check_type", "@target_table", "@severity", "@passed", "@actual_value", "@details"]
-          indexes = ["*"]
+          title           = "Quality Check Results (Last Runs)"
+          type            = "log_stream"
+          query           = "service:pipeline-runner @check_name:* env:demo"
+          columns         = ["@check_name", "@check_type", "@target_table", "@severity", "@passed", "@actual_value", "@details"]
+          indexes         = ["*"]
           message_display = "inline"
-          sort = { column = "time", order = "desc" }
+          sort            = { column = "time", order = "desc" }
         }
       },
       # Row 3: Quality Trend

@@ -1,6 +1,20 @@
 -- Data Pipeline POC - Postgres schema for dbt pipeline
 -- Raw tables populated by market-mock, transformed by dbt
 
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'datadog') THEN
+        CREATE ROLE datadog LOGIN PASSWORD 'datadog';
+    END IF;
+END
+$$;
+
+GRANT pg_monitor TO datadog;
+GRANT CONNECT ON DATABASE exchange TO datadog;
+GRANT USAGE ON SCHEMA public TO datadog;
+
 CREATE TABLE IF NOT EXISTS participants (
     participant_id VARCHAR(20) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -70,3 +84,6 @@ INSERT INTO participants (participant_id, name, desk, participant_type) VALUES
     ('GEN001', 'Genial Investimentos', 'Equities', 'BROKER'),
     ('CLR001', 'Clear Corretora', 'Retail', 'BROKER')
 ON CONFLICT (participant_id) DO NOTHING;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO datadog;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO datadog;

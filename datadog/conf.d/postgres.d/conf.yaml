@@ -1,0 +1,21 @@
+init_config:
+
+instances:
+  - host: demo-postgres
+    port: 5432
+    username: datadog
+    password: datadog
+    dbname: exchange
+    dbm: true
+    query_samples:
+      enabled: true
+    query_metrics:
+      enabled: true
+    collect_schemas:
+      enabled: true
+    reported_hostname: demo-postgres
+    tags:
+      - env:demo
+      - team:data-platform
+      - domain:capital-markets
+      - db:postgres

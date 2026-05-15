@@ -8,6 +8,7 @@ import sys
 import click
 
 from executor import execute_pipeline, execute_job
+from controlm_metrics import emit_smoke_metrics
 
 # Configure structured logging
 logging.basicConfig(
@@ -61,6 +62,24 @@ def run_job_cmd(job_name, business_date):
 
     if outcome["status"] == "failed":
         sys.exit(1)
+
+
+@cli.command("emit-smoke-metrics")
+@click.option(
+    "--job-name",
+    default="leitura_dados",
+    show_default=True,
+    help="Synthetic Control-M job name to emit for dashboard validation.",
+)
+@click.option(
+    "--business-date",
+    default=None,
+    help="Business date in YYYY-MM-DD format. Defaults to today.",
+)
+def emit_smoke_metrics_cmd(job_name, business_date):
+    """Emit one Control-M metric/APM sample without touching the databases."""
+    result = emit_smoke_metrics(job_name=job_name, business_date=business_date)
+    click.echo(json.dumps(result, indent=2, default=str))
 
 
 if __name__ == "__main__":

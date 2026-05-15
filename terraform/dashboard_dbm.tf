@@ -1,7 +1,7 @@
 resource "datadog_dashboard_json" "mysql_dbm" {
   dashboard = jsonencode({
-    title       = "Exchange - MySQL DBM"
-    description = "Database monitoring for Data Pipeline POC MySQL instance - queries, latency, locks, and throughput"
+    title       = "Exchange - DBM Overview"
+    description = "Database monitoring for the Data Pipeline POC databases: MySQL, PostgreSQL, SQL Server DW, and Oracle source."
     layout_type = "ordered"
     tags        = ["env:demo", "team:data-platform", "domain:capital-markets"]
 
@@ -9,14 +9,14 @@ resource "datadog_dashboard_json" "mysql_dbm" {
       # Row 1: Overview
       {
         definition = {
-          title       = "MySQL Overview"
+          title       = "DBM Overview"
           type        = "group"
           layout_type = "ordered"
           widgets = [
             {
               definition = {
-                title   = "Avg Query Latency"
-                type    = "query_value"
+                title = "Avg Query Latency"
+                type  = "query_value"
                 requests = [{
                   queries = [{
                     data_source = "metrics"
@@ -32,8 +32,8 @@ resource "datadog_dashboard_json" "mysql_dbm" {
             },
             {
               definition = {
-                title   = "Queries/sec"
-                type    = "query_value"
+                title = "Queries/sec"
+                type  = "query_value"
                 requests = [{
                   queries = [{
                     data_source = "metrics"
@@ -49,8 +49,8 @@ resource "datadog_dashboard_json" "mysql_dbm" {
             },
             {
               definition = {
-                title   = "Active Connections"
-                type    = "query_value"
+                title = "Active Connections"
+                type  = "query_value"
                 requests = [{
                   queries = [{
                     data_source = "metrics"
@@ -64,6 +64,30 @@ resource "datadog_dashboard_json" "mysql_dbm" {
               }
             }
           ]
+        }
+      },
+      {
+        definition = {
+          title            = "DBM Instances"
+          type             = "note"
+          content          = <<-EOT
+## Database Monitoring scope
+
+The Compose stack configures Datadog DBM for:
+
+- `demo-mysql` / `exchange`
+- `demo-postgres` / `exchange`
+- `demo-sqlserver` / `master` and `demopoc`
+- `demo-oracle` / `XEPDB1`
+
+Use **Datadog → Database Monitoring** to inspect query samples, explain plans, waits, locks, deadlocks, and the pipeline correlation around Control-M jobs.
+EOT
+          background_color = "white"
+          font_size        = "14"
+          text_align       = "left"
+          show_tick        = false
+          tick_edge        = "left"
+          tick_pos         = "50%"
         }
       },
       # Row 2: Query Latency Over Time

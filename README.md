@@ -58,8 +58,9 @@ Simulates a realistic exchange-style batch processing flow — from market close
 
 ### Prerequisites
 
-- Docker Desktop (4GB+ RAM recommended)
-- Datadog API Key ([get one here](https://app.datadoghq.com/organization-settings/api-keys))
+- Podman Desktop / Podman machine, or Docker Compose
+- 8GB+ RAM available to the container VM for the full Oracle + SQL Server + DBM stack
+- Datadog credentials in `.env`
 - `make`
 
 ### Setup
@@ -69,14 +70,15 @@ Simulates a realistic exchange-style batch processing flow — from market close
 git clone https://github.com/schawirin/data-observability-poc.git
 cd data-observability-poc
 
-# 2. Create .env with your Datadog API key
+# 2. Create .env with your Datadog credentials
 cp .env.example .env
-# Edit .env and set DD_API_KEY=<your-key>
+# Edit .env and set DD_API_KEY=<your-key>, DD_SITE=<site>
+# DD_APP_KEY is optional unless applying Terraform.
 
-# 3. Start the full stack
+# 3. Start the full stack with Podman Compose
 make up
 
-# 4. Seed reference data
+# 4. Seed reference data if using the MySQL legacy demo path
 make seed
 ```
 
@@ -86,6 +88,38 @@ make seed
 - **MinIO Console**: http://localhost:9001 (minioadmin/minioadmin)
 - **Control-M Sim**: http://localhost:5000
 - **Control-M Workbench**: https://localhost:8443 (workbench/workbench)
+
+The Workbench image is optional and is behind a Compose profile:
+
+```bash
+make up-workbench
+```
+
+For the primary Podman flow, use `controlm-sim` directly.
+
+### Datadog Smoke Test
+
+To send one Control-M execution sample to Datadog without running the full Oracle/SQL Server pipeline:
+
+```bash
+make dd-smoke
+```
+
+Use these dashboard queries:
+
+```text
+sum:controlm.job.executions{env:demo,ctm_job:leitura_dados}.as_count()
+sum:trace.controlm.job.leitura_dados.hits{env:demo}
+```
+
+Real pipeline traces use the job names:
+
+```text
+trace.controlm.job.close_market_eod.hits
+trace.controlm.job.reconcile_d1_positions.hits
+trace.controlm.job.quality_gate_d1.hits
+trace.controlm.job.publish_d1_reports.hits
+```
 
 ---
 
@@ -208,7 +242,14 @@ make inject-row-count-diff      # Source/DW row count mismatch
 ### Data Jobs Monitoring (DJM)
 - Job status, duration, retries, SLA tracking
 - Pipeline-level and job-level views
-- Emitted via **OpenLineage** protocol through the Datadog Agent
+- OpenLineage events are sent to the Datadog Agent proxy and direct intake fallback
+- Control-M execution KPIs are sent with DogStatsD metrics:
+  - `controlm.job.executions`
+  - `controlm.job.ended_ok.count`
+  - `controlm.job.ended_not_ok.count`
+  - `controlm.job.duration_seconds`
+  - `controlm.job.retries`
+  - `controlm.job.output_rows`
 
 ### Data Lineage
 - Dataset-to-job and job-to-dataset tracing
@@ -219,6 +260,8 @@ make inject-row-count-diff      # Source/DW row count mismatch
 - Query performance, explain plans, wait events
 - Top queries, lock analysis, throughput
 - Correlation with pipeline job execution
+- Configured in `datadog/conf.d/` for MySQL, PostgreSQL, SQL Server, and Oracle
+- SQL Server DBM uses the custom Datadog Agent image in `datadog/Dockerfile` to install the Microsoft ODBC 18 driver
 
 ### Monitors (Terraform)
 - Job failure alerts
@@ -241,7 +284,7 @@ terraform init && terraform apply
 
 | Resource | File |
 |---|---|
-| Pipeline Dashboard | `dashboard_pipeline.tf` |
+| Control-M Pipeline Dashboard | `dashboard_pipeline.tf` |
 | Data Quality Dashboard | `dashboard_quality.tf` |
 | DBM Dashboard | `dashboard_dbm.tf` |
 | Monitors | `monitors.tf` |
@@ -256,8 +299,9 @@ exchange/
 ├── Makefile                    # All demo commands
 ├── .env.example                # Environment template
 ├── datadog/
-│   ├── datadog.yaml            # Agent config (OpenLineage proxy)
-│   └── conf.d/                 # Integration configs (MySQL, Oracle, SQL Server)
+│   ├── Dockerfile              # Agent image with SQL Server ODBC driver
+│   ├── datadog.yaml            # Agent config (DogStatsD, APM, OpenLineage proxy)
+│   └── conf.d/                 # DBM configs (MySQL, PostgreSQL, Oracle, SQL Server)
 ├── services/
 │   ├── controlm-sim/           # Control-M simulator + OpenLineage emitter
 │   ├── pipeline-runner/        # ETL jobs + quality gate
@@ -286,6 +330,8 @@ exchange/
 | `make clean` | Stop + remove volumes |
 | `make status` | Show container status |
 | `make logs` | Tail all logs |
+| `make dd-smoke` | Emit one Control-M metric/APM sample to Datadog |
+| `make dd-agent-status` | Show Datadog Agent status |
 | `make seed` | Load reference data |
 | `make generate-day` | Generate market data for a date |
 | `make demo-happy` | Run happy path scenario |

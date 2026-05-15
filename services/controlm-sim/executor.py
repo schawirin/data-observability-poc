@@ -45,6 +45,16 @@ MAX_RETRIES = 2
 
 def _log_structured(**fields):
     """Emit a structured JSON log line."""
+    job_name = fields.get("job_name")
+    status = fields.get("status")
+    if job_name:
+        fields.setdefault("job", {})
+        fields["job"].setdefault("name", job_name)
+        if status:
+            fields["job"].setdefault("status", status)
+    if "sla_miss" in fields:
+        fields.setdefault("sla", {})
+        fields["sla"].setdefault("miss", fields["sla_miss"])
     print(json.dumps(fields, default=str), flush=True)
 
 

@@ -70,6 +70,8 @@ def _job_tags(job_name, business_date, run_id=None, status=None, extra_tags=None
 
 def emit_job_started(job_name, business_date, run_id=None):
     tags = _job_tags(job_name, business_date, run_id, status="executing")
+    statsd.increment("controlm.job.started", tags=tags)
+    statsd.increment("controlm.job.executions", tags=tags)
     statsd.event(
         title=f"[Control-M] Job Started: {job_name}",
         message=f"Job `{job_name}` started.\n- **Folder:** {CTM_FOLDER}\n- **Order Date:** {business_date}\n- **Run ID:** {run_id or 'N/A'}",
@@ -85,8 +87,10 @@ def emit_job_ended_ok(job_name, business_date, run_id=None, duration_seconds=0,
     job_key = job_name
 
     statsd.gauge("controlm.job.duration", duration_seconds, tags=tags)
+    statsd.gauge("controlm.job.duration_seconds", duration_seconds, tags=tags)
     statsd.gauge("controlm.job.retries", retries, tags=tags)
     statsd.gauge("controlm.job.output_rows", output_rows, tags=tags)
+    statsd.increment("controlm.job.ended_ok.count", tags=tags)
 
     # Count metrics as gauges (always integer)
     val = _count("controlm.job.ended_ok", job_key)
@@ -95,6 +99,7 @@ def emit_job_ended_ok(job_name, business_date, run_id=None, duration_seconds=0,
     if sla_miss:
         val = _count("controlm.job.sla.violation", job_key)
         statsd.gauge("controlm.job.sla.violation", val, tags=tags)
+        statsd.increment("controlm.job.sla.violation.count", tags=tags)
         statsd.event(
             title=f"[Control-M] SLA Violation: {job_name}",
             message=f"Job `{job_name}` exceeded SLA.\n- **Duration:** {duration_seconds:.1f}s\n- **Order Date:** {business_date}",
@@ -117,7 +122,9 @@ def emit_job_ended_not_ok(job_name, business_date, run_id=None, duration_seconds
     job_key = job_name
 
     statsd.gauge("controlm.job.duration", duration_seconds, tags=tags)
+    statsd.gauge("controlm.job.duration_seconds", duration_seconds, tags=tags)
     statsd.gauge("controlm.job.retries", retries, tags=tags)
+    statsd.increment("controlm.job.ended_not_ok.count", tags=tags)
 
     val = _count("controlm.job.ended_not_ok", job_key)
     statsd.gauge("controlm.job.ended_not_ok", val, tags=tags)
@@ -125,6 +132,7 @@ def emit_job_ended_not_ok(job_name, business_date, run_id=None, duration_seconds
     if sla_miss:
         val = _count("controlm.job.sla.violation", job_key)
         statsd.gauge("controlm.job.sla.violation", val, tags=tags)
+        statsd.increment("controlm.job.sla.violation.count", tags=tags)
 
     statsd.event(
         title=f"[Control-M] Job Ended NOT OK: {job_name}",
@@ -201,10 +209,55 @@ def emit_dq_check_result(check_name, check_type, target_table, passed,
     check_key = check_name
     val = _count("controlm.dq.checks_run", check_key)
     statsd.gauge("controlm.dq.checks_run", val, tags=tags)
+    statsd.increment("controlm.dq.checks_run.count", tags=tags)
 
     if not passed:
         val = _count("controlm.dq.checks_failed", check_key)
         statsd.gauge("controlm.dq.checks_failed", val, tags=tags)
+        statsd.increment("controlm.dq.checks_failed.count", tags=tags)
 
     if actual_value is not None:
         statsd.gauge("controlm.dq.actual_value", float(actual_value), tags=tags)
+
+
+def emit_smoke_metrics(job_name="leitura_dados", business_date=None):
+    """Emit one small Control-M execution sample for dashboard validation."""
+    import time
+    import uuid
+    from datetime import datetime
+
+    from ddtrace import tracer
+
+    business_date = business_date or datetime.now().strftime("%Y-%m-%d")
+    run_id = str(uuid.uuid4())
+
+    with tracer.trace(
+        f"controlm.job.{job_name}",
+        service="controlm-sim",
+        resource=job_name,
+        span_type="worker",
+    ) as span:
+        span.set_tags({
+            "env": "demo",
+            "team": "data-platform",
+            "orchestrator": "controlm",
+            "business_date": business_date,
+            "ctm.job": job_name,
+            "ctm.status": "ended_ok",
+            "run_id": run_id,
+        })
+        emit_job_started(job_name, business_date, run_id)
+        emit_job_wait_time(job_name, business_date, 0.2, run_id)
+        time.sleep(0.1)
+        emit_job_ended_ok(
+            job_name,
+            business_date,
+            run_id,
+            duration_seconds=1.23,
+            retries=0,
+            sla_miss=False,
+            output_rows=100,
+        )
+
+    tracer.shutdown(timeout=5)
+    return {"job_name": job_name, "business_date": business_date, "run_id": run_id}

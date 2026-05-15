@@ -18,7 +18,8 @@ logs:
 
 instances:
   # Instance 1: master — server-level metrics + DBM
-  - host: "demo-sqlserver,1433"
+  - host: demo-sqlserver
+    port: 1433
     username: datadog
     password: "Dd@DemoPoc2026!"
     database: master
@@ -36,7 +37,8 @@ instances:
       - team:data-platform
 
   # Instance 2: demopoc — ADWPM* tables + DQ custom metrics
-  - host: "demo-sqlserver,1433"
+  - host: demo-sqlserver
+    port: 1433
     username: datadog
     password: "Dd@DemoPoc2026!"
     database: demopoc
