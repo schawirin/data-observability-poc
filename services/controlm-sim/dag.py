@@ -1,12 +1,25 @@
-"""DAG definition for the market-d1 pipeline."""
+"""DAG definition for the b3_d1_pipeline."""
+
+import os as _os
+
+# Production-realistic durations. The actual ETL is fast (~2s per job in our
+# mock), but Datadog DJM expects job runs of dozens of seconds to minutes to
+# properly aggregate Duration histograms and pinpoint failures within a run.
+# So we pad each job with a sleep matching a realistic Control-M B3 pipeline.
+# Override globally via env JOB_PADDING_FACTOR (default 1.0 = full duration).
+PADDING_FACTOR = float(_os.environ.get("JOB_PADDING_FACTOR", "1.0"))
 
 PIPELINE_DAG = {
-    "name": "market-d1",
+    "name": "b3_d1_pipeline",
     "jobs": [
-        {"name": "close_market_eod", "depends_on": [], "sla_seconds": 600},
-        {"name": "reconcile_d1_positions", "depends_on": ["close_market_eod"], "sla_seconds": 900},
-        {"name": "quality_gate_d1", "depends_on": ["reconcile_d1_positions"], "sla_seconds": 300},
-        {"name": "publish_d1_reports", "depends_on": ["quality_gate_d1"], "sla_seconds": 600},
+        # EOD consolidation (book close + VWAP) — typically 1 min in prod
+        {"name": "close_market_eod",       "depends_on": [],                          "sla_seconds": 600, "padding_seconds": int(60 * PADDING_FACTOR)},
+        # D+1 reconciliation — heavy SQL join, typically 2 min in prod
+        {"name": "reconcile_d1_positions", "depends_on": ["close_market_eod"],        "sla_seconds": 900, "padding_seconds": int(120 * PADDING_FACTOR)},
+        # Quality gate — fast checks, ~30s
+        {"name": "quality_gate_d1",        "depends_on": ["reconcile_d1_positions"],  "sla_seconds": 300, "padding_seconds": int(30 * PADDING_FACTOR)},
+        # Publish to S3 — 1 min for parquet + CSV exports
+        {"name": "publish_d1_reports",     "depends_on": ["quality_gate_d1"],         "sla_seconds": 600, "padding_seconds": int(60 * PADDING_FACTOR)},
     ],
 }
 

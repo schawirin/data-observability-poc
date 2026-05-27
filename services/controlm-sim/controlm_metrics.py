@@ -27,14 +27,19 @@ CTM_APPLICATION = os.environ.get("CTM_APPLICATION", "exchange-data-platform")
 CTM_SUB_APPLICATION = os.environ.get("CTM_SUB_APPLICATION", "derivatives")
 CTM_HOST = os.environ.get("CTM_HOST", "workbench")
 CTM_FOLDER = "Market_D1_Pipeline"
+DD_ENV = os.environ.get("DD_ENV", "demo")
+DD_SERVICE = os.environ.get("DD_SERVICE", "controlm-sim")
+DD_VERSION = os.environ.get("DD_VERSION", "2.0.0")
 
 _BASE_TAGS = [
+    f"env:{DD_ENV}",
+    f"service:{DD_SERVICE}",
+    f"version:{DD_VERSION}",
     f"ctm_server:{CTM_SERVER}",
     f"ctm_application:{CTM_APPLICATION}",
     f"ctm_sub_application:{CTM_SUB_APPLICATION}",
     f"ctm_host:{CTM_HOST}",
     f"ctm_folder:{CTM_FOLDER}",
-    "env:demo",
     "team:data-platform",
     "orchestrator:controlm",
 ]
@@ -198,6 +203,8 @@ def emit_pipeline_completed(pipeline_name, business_date, run_id,
 def emit_dq_check_result(check_name, check_type, target_table, passed,
                          severity, business_date, actual_value=None, expected_value=None):
     tags = list(_BASE_TAGS) + [
+        "ctm_job:quality_gate_d1",
+        "job_name:quality_gate_d1",
         f"check_name:{check_name}",
         f"check_type:{check_type}",
         f"target_table:{target_table}",
@@ -207,6 +214,9 @@ def emit_dq_check_result(check_name, check_type, target_table, passed,
     ]
 
     check_key = check_name
+    statsd.gauge("controlm.dq.check_ran", 1, tags=tags)
+    statsd.gauge("controlm.dq.check_failed", 0 if passed else 1, tags=tags)
+
     val = _count("controlm.dq.checks_run", check_key)
     statsd.gauge("controlm.dq.checks_run", val, tags=tags)
     statsd.increment("controlm.dq.checks_run.count", tags=tags)

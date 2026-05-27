@@ -16,12 +16,18 @@ from datetime import datetime
 from flask import Flask, Response, render_template, request, jsonify, stream_with_context
 
 from executor import execute_pipeline, execute_job
+import catalog
+from executor_custom import execute_custom
+from log_correlation import install_file_logging
 
 app = Flask(__name__)
 
 _log_queues: dict[str, queue.Queue] = {}
 _log_queues_lock = threading.Lock()
 _pipeline_state = {"status": "idle", "result": None}
+
+
+install_file_logging()
 
 
 def _broadcast(msg_type, text, **extra):
@@ -57,7 +63,7 @@ def _run_pipeline_thread(business_date, inject_fault=None):
 
     try:
         fault_desc = FAULT_OPTIONS.get(inject_fault, "Nenhuma") if inject_fault else "Nenhuma"
-        _broadcast("info", f"[controlm-sim] Pipeline 'market-d1' iniciando para {business_date}")
+        _broadcast("info", f"[controlm-sim] Pipeline 'b3_d1_pipeline' iniciando para {business_date}")
         _broadcast("info", f"[controlm-sim] Falha injetada: {fault_desc}")
 
         # Set env vars for hard faults (these cause actual job failures)
@@ -76,7 +82,7 @@ def _run_pipeline_thread(business_date, inject_fault=None):
 
         # Map compound faults to Oracle seed faults
         oracle_fault = inject_fault
-        if inject_fault == "all_hard":
+        if inject_fault in ("gate_fail_hard", "all_hard"):
             oracle_fault = "all"
         elif inject_fault == "db_all":
             oracle_fault = "all"  # also inject DQ data faults
@@ -141,13 +147,13 @@ def _run_pipeline_thread(business_date, inject_fault=None):
             checks_failed = qg.get("checks_failed", 0) if isinstance(qg, dict) else 0
 
             _broadcast("pipeline-complete",
-                f"[market-d1] PIPELINE CONCLUÍDO — "
+                f"[b3_d1_pipeline] PIPELINE CONCLUÍDO — "
                 f"DQ Gate: {gate_status} ({checks_failed} checks falharam) — "
                 f"{summary['duration_seconds']}s",
                 result=summary)
         else:
             _broadcast("pipeline-failed",
-                f"[market-d1] PIPELINE FALHOU — {summary.get('duration_seconds', '?')}s",
+                f"[b3_d1_pipeline] PIPELINE FALHOU — {summary.get('duration_seconds', '?')}s",
                 result=summary)
 
     except Exception as exc:
@@ -186,45 +192,122 @@ def api_status():
     return jsonify(_pipeline_state)
 
 
-# ── Job definitions ────────────────────────────────────────────────────────────
+@app.route("/api/lineage-health")
+def api_lineage_health():
+    """Check if recent OL events have been indexed by Datadog.
 
-_JOB_DEFS = {
-    "close_market_eod": {
-        "description": "ETL: Oracle ASTADRVT_TRADE_MVMT → SQL Server ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO",
-        "sla_seconds": 600,
-        "depends_on": None,
-    },
-    "reconcile_d1_positions": {
-        "description": "ETL: Oracle ASTANO/ASTACASH → SQL Server ADWPM_POSICAO_*",
-        "sla_seconds": 900,
-        "depends_on": "close_market_eod",
-    },
-    "quality_gate_d1": {
-        "description": "DQ: 5 checks (duplicatas, nulos, soma-zero, row-count) → ADWPM_DQ_RESULTS",
-        "sla_seconds": 300,
-        "depends_on": "reconcile_d1_positions",
-    },
-    "publish_d1_reports": {
-        "description": "Export: SQL Server DW → MinIO CSV/Parquet",
-        "sla_seconds": 600,
-        "depends_on": "quality_gate_d1",
-    },
-}
+    Queries the custom metric `b3.ol.events_total` (emitted on every OL event).
+    Metrics index in ~1 min, so this gives early confirmation that the event
+    reached the Datadog SaaS — much faster than the Lineage UI (~15-30 min).
+    Returns the count of events emitted by job_name in the requested window.
+    """
+    import os
+    api_key = os.environ.get("DD_API_KEY")
+    app_key = os.environ.get("DD_APP_KEY")
+    dd_site = os.environ.get("DD_SITE", "datadoghq.com")
+    ol_namespace = os.environ.get("OL_NAMESPACE", "b3-poc-demo-v3")
+    if not api_key or not app_key:
+        return jsonify({"error": "DD_API_KEY or DD_APP_KEY missing"}), 500
+
+    minutes = int(request.args.get("minutes", 15))
+    import time as _time
+    to_ts = int(_time.time())
+    from_ts = to_ts - minutes * 60
+
+    query = f"sum:b3.ol.events_total{{ol_namespace:{ol_namespace}}} by {{job_name,event_type}}.as_count()"
+    url = (
+        f"https://api.{dd_site}/api/v1/query"
+        f"?from={from_ts}&to={to_ts}&query={query}"
+    )
+
+    try:
+        import urllib.parse, urllib.request
+        url_safe = (
+            f"https://api.{dd_site}/api/v1/query?"
+            f"from={from_ts}&to={to_ts}&query={urllib.parse.quote(query)}"
+        )
+        req = urllib.request.Request(
+            url_safe,
+            headers={
+                "DD-API-KEY": api_key,
+                "DD-APPLICATION-KEY": app_key,
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
+
+    series = data.get("series", [])
+    summary = []
+    for s in series:
+        scope_tags = dict(t.split(":", 1) for t in s.get("scope", "").split(",") if ":" in t)
+        points = s.get("pointlist", [])
+        total = sum(p[1] for p in points if p[1] is not None)
+        last_ts = points[-1][0] / 1000 if points else None
+        summary.append({
+            "job_name":    scope_tags.get("job_name", "?"),
+            "event_type":  scope_tags.get("event_type", "?"),
+            "total":       int(total),
+            "last_seen":   last_ts,
+        })
+
+    return jsonify({
+        "window_minutes": minutes,
+        "from_ts": from_ts,
+        "to_ts": to_ts,
+        "query": query,
+        "ol_namespace": ol_namespace,
+        "series_count": len(series),
+        "summary": summary,
+    })
+
+
+@app.route("/api/runs")
+def api_runs():
+    """Return the last N completed pipeline runs (from /data/runs.jsonl)."""
+    import os
+    limit = int(request.args.get("limit", 50))
+    runs_file = "/data/runs.jsonl"
+    if not os.path.exists(runs_file):
+        return jsonify({"runs": []})
+    try:
+        with open(runs_file, "r", encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except Exception:
+        return jsonify({"runs": []})
+    records = []
+    for line in lines[-limit:][::-1]:  # newest first
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except Exception:
+            continue
+    return jsonify({"runs": records})
+
+
+# ── Runtime overrides (date + fault injection per-job) ─────────────────────────
+# Job catalog (built-in + custom) lives in catalog.py / /data/jobs_catalog.json
 
 _job_overrides: dict = {}
 
 
 @app.route("/api/jobs", methods=["GET"])
 def api_jobs():
+    """Return merged catalog (built-in + custom) with overrides."""
+    merged = catalog.list_jobs()
     result = {}
-    for name, defn in _JOB_DEFS.items():
+    for name, defn in merged.items():
         result[name] = {**defn, "overrides": _job_overrides.get(name, {})}
     return jsonify(result)
 
 
 @app.route("/api/jobs/<job_name>", methods=["PUT"])
 def api_job_update(job_name):
-    if job_name not in _JOB_DEFS:
+    """Update runtime overrides (date / fault). Does NOT update the catalog."""
+    if not catalog.get_job(job_name):
         return jsonify({"error": f"Unknown job: {job_name}"}), 404
     data = request.get_json(force=True)
     _job_overrides[job_name] = {
@@ -234,9 +317,58 @@ def api_job_update(job_name):
     return jsonify({"status": "updated", "job": job_name, "overrides": _job_overrides[job_name]})
 
 
+# ── CATALOG CRUD (custom jobs) ─────────────────────────────────────────────────
+
+@app.route("/api/catalog", methods=["GET"])
+def api_catalog_list():
+    return jsonify(catalog.list_jobs())
+
+
+@app.route("/api/catalog", methods=["POST"])
+def api_catalog_create():
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        record = catalog.upsert_job(data)
+        _broadcast("info", f"[CTM] Job cadastrado: {record['id']} (type={record['type']})")
+        return jsonify({"status": "created", "job": record}), 201
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/catalog/<job_id>", methods=["PUT"])
+def api_catalog_update(job_id):
+    data = request.get_json(force=True, silent=True) or {}
+    data["id"] = job_id
+    try:
+        record = catalog.upsert_job(data)
+        _broadcast("info", f"[CTM] Job atualizado: {record['id']}")
+        return jsonify({"status": "updated", "job": record})
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/catalog/<job_id>", methods=["DELETE"])
+def api_catalog_delete(job_id):
+    try:
+        ok = catalog.delete_job(job_id)
+        if not ok:
+            return jsonify({"error": f"job not found: {job_id}"}), 404
+        _broadcast("warn", f"[CTM] Job removido: {job_id}")
+        return jsonify({"status": "deleted", "job": job_id})
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 @app.route("/api/run/<job_name>", methods=["POST"])
 def api_run_single(job_name):
-    if job_name not in _JOB_DEFS:
+    job = catalog.get_job(job_name)
+    if not job:
         return jsonify({"error": f"Unknown job: {job_name}"}), 404
 
     data = request.get_json(force=True, silent=True) or {}
@@ -246,14 +378,26 @@ def api_run_single(job_name):
         or datetime.now().strftime("%Y-%m-%d")
     )
 
+    is_builtin = catalog.is_builtin(job_name)
+
     def _run():
-        _broadcast("job-start", f"[CTM] Disparando job: {job_name} ({business_date})", job=job_name)
+        _broadcast("job-start", f"[CTM] Disparando job: {job_name} ({business_date}) — type={job.get('type', 'builtin')}", job=job_name)
         try:
-            result = execute_job(job_name, business_date)
+            if is_builtin:
+                result = execute_job(job_name, business_date)
+            else:
+                result = execute_custom(job, business_date)
+
             ok = result.get("status") == "success"
+            text_extra = ""
+            if result.get("row_count") is not None:
+                text_extra = f" ({result['row_count']} rows)"
+            elif result.get("rows_copied") is not None:
+                text_extra = f" ({result['rows_copied']} rows copied)"
+
             _broadcast(
                 "success" if ok else "error",
-                f"[{job_name}] {'ENDED OK' if ok else 'ENDED NOT OK'} — {result.get('duration_seconds', '?')}s",
+                f"[{job_name}] {'ENDED OK' if ok else 'ENDED NOT OK'} — {result.get('duration_seconds', '?')}s{text_extra}",
                 job=job_name,
                 job_status="ended_ok" if ok else "ended_not_ok",
                 finished=True,
@@ -262,6 +406,16 @@ def api_run_single(job_name):
                 sla_miss=result.get("sla_miss", False),
                 result=result,
             )
+
+            # If the job has stdout to expose, dump tail to console
+            tail = result.get("stdout_tail")
+            if tail:
+                for line in tail.strip().splitlines()[-20:]:
+                    _broadcast("info", f"[{job_name}] {line}", job=job_name)
+            err = result.get("error")
+            if err and not ok:
+                for line in str(err).strip().splitlines()[-10:]:
+                    _broadcast("error", f"[{job_name}] {line}", job=job_name)
         except Exception as exc:
             _broadcast("error", f"[{job_name}] FALHOU: {exc}", job=job_name, job_status="ended_not_ok", finished=True)
 

@@ -1,6 +1,10 @@
 .PHONY: up down seed run-eod run-d1 inject-fault demo-happy demo-fail logs status clean \
         ctm-deploy ctm-run-d1 ctm-run-eod ctm-status ctm-login \
+        ctm-generate ctm-deploy-script ctm-deploy-command ctm-deploy-embedded \
+        ctm-deploy-database ctm-deploy-all ctm-test-all-variants ctm-add-job-help \
         demo-caso1 demo-caso2 demo-caso3 demo-overflow demo-row-count-diff \
+        demo-hard-oracle-timeout demo-hard-gate-fail demo-hard-s3-down demo-hard-all \
+        demo-db-blocking demo-db-deadlock \
         up-workbench dd-agent-status dd-smoke
 
 # Default business date: today
@@ -69,11 +73,73 @@ ctm-login:
 	  -d '{"username":"$(CTM_USER)","password":"$(CTM_PASS)"}' | python3 -m json.tool
 
 ctm-deploy:
-	@echo "▶ Deploying Market_D1_Pipeline to Control-M Workbench..."
-	@bash controlm/setup.sh $(CTM_HOST) $(CTM_PORT)
+	@echo "▶ Deploying B3_D1_Pipeline to Control-M Workbench..."
+	@bash controlm/setup.sh --host $(CTM_HOST) --port $(CTM_PORT)
+
+# ─── Variant generator + per-variant deploys ────────────────────
+# Edit controlm/jobs/manifest.yaml then run `make ctm-generate` to regenerate
+# the four Job:Type variants and the _job_io_generated.py table.
+GENERATOR_VENV := .venv-generator
+GENERATOR_PY   := $(GENERATOR_VENV)/bin/python
+
+$(GENERATOR_PY):
+	@echo "▶ Creating one-shot venv for the manifest generator..."
+	@python3 -m venv $(GENERATOR_VENV)
+	@$(GENERATOR_VENV)/bin/pip install --quiet pyyaml
+
+ctm-generate: $(GENERATOR_PY)
+	@$(GENERATOR_PY) controlm/generate.py
+
+ctm-deploy-script: ctm-generate
+	@bash controlm/setup.sh --variant script   --host $(CTM_HOST) --port $(CTM_PORT)
+
+ctm-deploy-command: ctm-generate
+	@bash controlm/setup.sh --variant command  --host $(CTM_HOST) --port $(CTM_PORT)
+
+ctm-deploy-embedded: ctm-generate
+	@bash controlm/setup.sh --variant embedded --host $(CTM_HOST) --port $(CTM_PORT)
+
+ctm-deploy-database: ctm-generate
+	@bash controlm/setup.sh --variant database --host $(CTM_HOST) --port $(CTM_PORT)
+
+ctm-deploy-all: ctm-generate
+	@bash controlm/setup.sh --variant all      --host $(CTM_HOST) --port $(CTM_PORT)
+
+ctm-test-all-variants: ctm-deploy-all
+	@echo "═══════════════════════════════════════════════"
+	@echo "  Running all 4 variants sequentially for $(BUSINESS_DATE)"
+	@echo "═══════════════════════════════════════════════"
+	@for v in script command embedded database; do \
+	  echo "▶ Variant $$v"; \
+	  $(MAKE) ctm-run-d1 BUSINESS_DATE=$(BUSINESS_DATE) || echo "  variant $$v failed"; \
+	  sleep 2; \
+	  $(MAKE) ctm-status; \
+	done
+	@echo "✓ Validate in Datadog: 4 pipeline runs in DJM, lineage events from each Python variant."
+
+ctm-add-job-help:
+	@echo "To add a new job to the pipeline:"
+	@echo "  1. Edit  controlm/jobs/manifest.yaml  — append a new entry under 'jobs:'"
+	@echo "  2. Run   make ctm-generate            — regenerates the 4 JSON variants + JOB_IO"
+	@echo "  3. Run   make ctm-deploy-all          — deploys all variants to Workbench/Helix"
+	@echo ""
+	@echo "Minimal new-job template (paste under 'jobs:' in manifest.yaml):"
+	@echo "  - name: my_new_job"
+	@echo "    sla: \"00:10\""
+	@echo "    depends_on: publish_d1_reports   # or null"
+	@echo "    description: \"What this job does\""
+	@echo "    inputs:"
+	@echo "      - {ns: sqlserver, name: \"dbo.SOME_TABLE\"}"
+	@echo "    outputs:"
+	@echo "      - {ns: minio, name: \"exports/some_output\"}"
+	@echo "    # Optional — only if you also want this job in the database variant:"
+	@echo "    sql:"
+	@echo "      type: mssql"
+	@echo "      query: |"
+	@echo "        SELECT COUNT(*) FROM dbo.SOME_TABLE WHERE business_date = ?"
 
 ctm-run-d1:
-	@echo "▶ Triggering Market_D1_Pipeline for $(BUSINESS_DATE) via Control-M..."
+	@echo "▶ Triggering B3_D1_Pipeline for $(BUSINESS_DATE) via Control-M..."
 	$(eval TOKEN := $(shell curl -sk -X POST "$(CTM_BASE)/session/login" \
 	  -H "Content-Type: application/json" \
 	  -d '{"username":"$(CTM_USER)","password":"$(CTM_PASS)"}' \
@@ -81,11 +147,11 @@ ctm-run-d1:
 	@curl -sk -X POST "$(CTM_BASE)/run" \
 	  -H "Authorization: Bearer $(TOKEN)" \
 	  -H "Content-Type: application/json" \
-	  -d '{"folder":"Market_D1_Pipeline","variables":[{"ODATE":"$(BUSINESS_DATE)"}]}' \
+	  -d '{"folder":"B3_D1_Pipeline","variables":[{"ODATE":"$(BUSINESS_DATE)"}]}' \
 	  | python3 -m json.tool
 
 ctm-run-eod:
-	@echo "▶ Triggering Market_close_market_eod for $(BUSINESS_DATE) via Control-M..."
+	@echo "▶ Triggering B3_close_market_eod for $(BUSINESS_DATE) via Control-M..."
 	$(eval TOKEN := $(shell curl -sk -X POST "$(CTM_BASE)/session/login" \
 	  -H "Content-Type: application/json" \
 	  -d '{"username":"$(CTM_USER)","password":"$(CTM_PASS)"}' \
@@ -93,7 +159,7 @@ ctm-run-eod:
 	@curl -sk -X POST "$(CTM_BASE)/run" \
 	  -H "Authorization: Bearer $(TOKEN)" \
 	  -H "Content-Type: application/json" \
-	  -d '{"jobs":"Market_close_market_eod","variables":[{"ODATE":"$(BUSINESS_DATE)"}]}' \
+	  -d '{"jobs":"B3_close_market_eod","variables":[{"ODATE":"$(BUSINESS_DATE)"}]}' \
 	  | python3 -m json.tool
 
 ctm-status:
@@ -102,7 +168,7 @@ ctm-status:
 	  -H "Content-Type: application/json" \
 	  -d '{"username":"$(CTM_USER)","password":"$(CTM_PASS)"}' \
 	  | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))"))
-	@curl -sk -X GET "$(CTM_BASE)/run/jobs/status?folder=Market_D1_Pipeline" \
+	@curl -sk -X GET "$(CTM_BASE)/run/jobs/status?folder=B3_D1_Pipeline" \
 	  -H "Authorization: Bearer $(TOKEN)" \
 	  | python3 -m json.tool
 
@@ -146,6 +212,32 @@ inject-overflow:
 
 inject-row-count-diff:
 	$(MAKE) inject-fault FAULT=row_count_diff
+
+# ─── HARD FAIL Demo Scenarios (jobs individuais falham, não só quality_gate) ──
+# Para a B3 ver pinpoint de falha por job no DJM + Lineage com edges FAIL
+demo-hard-oracle-timeout:  ## close_market_eod CRASHA com ORA-12170 TNS timeout
+	@echo "═══ HARD FAIL: ORA-12170 em close_market_eod ═══"
+	$(CONTAINER) exec demo-controlm-sim python main.py run-pipeline --business-date $(BUSINESS_DATE) --inject-fault oracle_timeout
+
+demo-hard-gate-fail:  ## quality_gate_d1 aborta o pipeline (critical failures)
+	@echo "═══ HARD FAIL: quality_gate_d1 aborta o pipeline ═══"
+	$(CONTAINER) exec demo-controlm-sim python main.py run-pipeline --business-date $(BUSINESS_DATE) --inject-fault gate_fail_hard
+
+demo-hard-s3-down:  ## publish_d1_reports falha com S3/MinIO connection refused
+	@echo "═══ HARD FAIL: S3 down em publish_d1_reports ═══"
+	$(CONTAINER) exec demo-controlm-sim python main.py run-pipeline --business-date $(BUSINESS_DATE) --inject-fault s3_down
+
+demo-hard-all:  ## Todos os 3 DQ + gate hard fail = pipeline ENDED NOT OK
+	@echo "═══ HARD FAIL: pipeline inteiro falha ═══"
+	$(CONTAINER) exec demo-controlm-sim python main.py run-pipeline --business-date $(BUSINESS_DATE) --inject-fault all_hard
+
+demo-db-blocking:  ## Blocking query (exclusive lock 10s em ADWPM_DQ_RESULTS)
+	@echo "═══ DB: Blocking query ═══"
+	$(CONTAINER) exec demo-controlm-sim python main.py run-pipeline --business-date $(BUSINESS_DATE) --inject-fault db_blocking
+
+demo-db-deadlock:  ## Deadlock entre ADWPM_MOVIMENTO e ADWPM_POSICAO
+	@echo "═══ DB: Deadlock ═══"
+	$(CONTAINER) exec demo-controlm-sim python main.py run-pipeline --business-date $(BUSINESS_DATE) --inject-fault db_deadlock
 
 # ─── Real Exchange Demo Scenarios ─────────────────────────────────────
 demo-caso1:  ## Caso 1: Injects 4 duplicate rows in ASTADRVT_TRADE_MVMT + DW, runs pipeline, quality_gate fires

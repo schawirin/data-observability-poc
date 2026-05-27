@@ -1,0 +1,68 @@
+{
+  "B3_D1_Pipeline": {
+    "Type": "SimpleFolder",
+    "Comment": "Auto-generated. Variant: Job:EmbeddedScript (script inline in JSON). Deploy: setup.sh --variant embedded",
+    "B3_close_market_eod": {
+      "Type": "Job:EmbeddedScript",
+      "Script": "#!/usr/bin/env bash\nset -euo pipefail\nexec %%PYTHON_BIN%% %%SCRIPT_DIR%%%%PATH_SEP%%run_job.py --job close_market_eod --date %%ODATE%%\n",
+      "FileName": "embedded_close_market_eod.sh",
+      "Host": "%%CTM_AGENT_HOST%%",
+      "RunAs": "%%RUN_AS%%",
+      "Description": "EOD market close — consolidates book, calculates closing prices and VWAP",
+      "SLA": {
+        "Duration": "00:10"
+      }
+    },
+    "B3_reconcile_d1_positions": {
+      "Type": "Job:EmbeddedScript",
+      "Script": "#!/usr/bin/env bash\nset -euo pipefail\nexec %%PYTHON_BIN%% %%SCRIPT_DIR%%%%PATH_SEP%%run_job.py --job reconcile_d1_positions --date %%ODATE%%\n",
+      "FileName": "embedded_reconcile_d1_positions.sh",
+      "Host": "%%CTM_AGENT_HOST%%",
+      "RunAs": "%%RUN_AS%%",
+      "Description": "D+1 reconciliation — matches trades to settlement instructions and participant positions",
+      "SLA": {
+        "Duration": "00:15"
+      },
+      "DependsOn": [
+        {
+          "Name": "B3_close_market_eod",
+          "State": "OK"
+        }
+      ]
+    },
+    "B3_quality_gate_d1": {
+      "Type": "Job:EmbeddedScript",
+      "Script": "#!/usr/bin/env bash\nset -euo pipefail\nexec %%PYTHON_BIN%% %%SCRIPT_DIR%%%%PATH_SEP%%run_job.py --job quality_gate_d1 --date %%ODATE%%\n",
+      "FileName": "embedded_quality_gate_d1.sh",
+      "Host": "%%CTM_AGENT_HOST%%",
+      "RunAs": "%%RUN_AS%%",
+      "Description": "D+1 quality gate — completeness, uniqueness, consistency, reasonableness, timeliness",
+      "SLA": {
+        "Duration": "00:05"
+      },
+      "DependsOn": [
+        {
+          "Name": "B3_reconcile_d1_positions",
+          "State": "OK"
+        }
+      ]
+    },
+    "B3_publish_d1_reports": {
+      "Type": "Job:EmbeddedScript",
+      "Script": "#!/usr/bin/env bash\nset -euo pipefail\nexec %%PYTHON_BIN%% %%SCRIPT_DIR%%%%PATH_SEP%%run_job.py --job publish_d1_reports --date %%ODATE%%\n",
+      "FileName": "embedded_publish_d1_reports.sh",
+      "Host": "%%CTM_AGENT_HOST%%",
+      "RunAs": "%%RUN_AS%%",
+      "Description": "D+1 publish — generates curated reports and exports CSV/Parquet to S3/MinIO",
+      "SLA": {
+        "Duration": "00:10"
+      },
+      "DependsOn": [
+        {
+          "Name": "B3_quality_gate_d1",
+          "State": "OK"
+        }
+      ]
+    }
+  }
+}

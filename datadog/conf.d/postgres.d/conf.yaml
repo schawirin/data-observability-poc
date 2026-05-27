@@ -1,5 +1,15 @@
 init_config:
 
+logs:
+  - type: file
+    path: /var/log/postgres-data/log/*.log
+    source: postgresql
+    service: demo-postgres
+    tags:
+      - env:demo
+      - team:data-platform
+      - db:postgres
+
 instances:
   - host: demo-postgres
     port: 5432

@@ -77,6 +77,14 @@ services:
       - pg_stat_statements.track=all
       - -c
       - track_io_timing=on
+      - -c
+      - logging_collector=on
+      - -c
+      - log_directory=log
+      - -c
+      - log_filename=postgresql-%Y-%m-%d.log
+      - -c
+      - log_min_duration_statement=1000
     ports:
       - "5432:5432"
     volumes:
@@ -171,34 +179,24 @@ services:
       DD_DOGSTATSD_NON_LOCAL_TRAFFIC: "true"
       DD_DOGSTATSD_TAG_CARDINALITY: orchestrator
       DD_ENABLE_METADATA_COLLECTION: "true"
-    ports:
-      - "8125:8125/udp"
-      - "8126:8126"
+    # Sem port binding no host — coexiste com outro Datadog Agent (org diferente)
+    # rodando em outro projeto. Todos os serviços B3 alcançam o agent via
+    # rede privada `b3-network` (hostname interno: `datadog-agent`).
+    # Se precisar enviar dados do host, use `podman exec demo-datadog-agent`.
     volumes:
       - ./datadog/conf.d:/etc/datadog-agent/conf.d
       - ./datadog/datadog.yaml:/etc/datadog-agent/datadog.yaml:ro
       - sqlserver_data:/var/log/sqlserver:ro
+      - controlm-sim-data:/var/log/controlm-sim:ro
+      - ./logs:/var/log/b3-demo:ro
+      - mysql_data:/var/log/mysql-data:ro
+      - pg_data:/var/log/postgres-data:ro
 
-  dbt-runner:
-    build: ./services/dbt-project
-    container_name: demo-dbt-runner
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_USER: exchange
-      POSTGRES_PASSWORD: demopoc2026
-      POSTGRES_DB: exchange
-      OPENLINEAGE_URL: http://datadog-agent:8126
-      OPENLINEAGE_ENDPOINT: openlineage/api/v1/lineage
-      OPENLINEAGE_NAMESPACE: exchange-poc
-    labels:
-      com.datadoghq.ad.logs: '[{"source":"python","service":"dbt-runner"}]'
-      com.datadoghq.tags.env: "demo"
-      com.datadoghq.tags.service: "dbt-runner"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./services/dbt-project:/app
+  # dbt-runner removed 2026-05-26: the B3 POC must demonstrate OpenLineage
+  # emitted exclusively by hand-written Python wrappers (controlm-sim,
+  # pipeline-runner). dbt-core with openlineage-dbt would emit lineage
+  # automatically and contaminate the test setup. See services/dbt-project/
+  # if you want to re-enable a second-phase "after we added dbt" demo.
 
   adminer:
     image: adminer:latest
@@ -222,6 +220,18 @@ services:
       POSTGRES_USER: exchange
       POSTGRES_PASSWORD: demopoc2026
       POSTGRES_DB: exchange
+      # Oracle source — required by faults.py and generators.py for fault injection
+      ORACLE_HOST: oracle
+      ORACLE_PORT: 1521
+      ORACLE_SERVICE: XEPDB1
+      ORACLE_USER: demopoc
+      ORACLE_PASSWORD: OracleDemo123!
+      # SQL Server destination — required by fault injection to mirror Oracle faults into the DW
+      MSSQL_HOST: sqlserver
+      MSSQL_PORT: 1433
+      MSSQL_USER: sa
+      MSSQL_SA_PASSWORD: "SqlDemo12345!"
+      MSSQL_DATABASE: demopoc
     labels:
       com.datadoghq.ad.logs: '[{"source":"python","service":"market-mock"}]'
       com.datadoghq.tags.env: "demo"
@@ -230,6 +240,10 @@ services:
       mysql:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      oracle:
+        condition: service_healthy
+      sqlserver:
         condition: service_healthy
 
   pipeline-runner:
@@ -252,6 +266,19 @@ services:
       DD_TRACE_ENABLED: "true"
       DD_TRACE_AGENT_URL: http://datadog-agent:8126
       DD_LOGS_INJECTION: "true"
+      OL_NAMESPACE: b3-poc-demo-v3
+      OL_PIPELINE: b3_d1_pipeline
+      OL_EVENT_TIME_SHIFT_HOURS: "3"
+      OL_ORACLE_NS: oracle://demo-oracle:1521
+      OL_SQLSERVER_NS: sqlserver://demo-sqlserver:1433
+      OL_S3_NS: s3://mock-exchange
+      ORACLE_HOST: oracle
+      ORACLE_SERVICE: XEPDB1
+      SQLSERVER_HOST: sqlserver
+      SQLSERVER_PORT: 1433
+      SQLSERVER_USER: sa
+      SQLSERVER_PASSWORD: "SqlDemo12345!"
+      SQLSERVER_DATABASE: demopoc
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -315,6 +342,12 @@ services:
       DD_TRACE_AGENT_URL: http://datadog-agent:8126
       DD_LOGS_INJECTION: "true"
       DD_RUNTIME_METRICS_ENABLED: "true"
+      OL_NAMESPACE: b3-poc-demo-v3
+      OL_PIPELINE: b3_d1_pipeline
+      OL_EVENT_TIME_SHIFT_HOURS: "3"
+      OL_ORACLE_NS: oracle://demo-oracle:1521
+      OL_SQLSERVER_NS: sqlserver://demo-sqlserver:1433
+      OL_S3_NS: s3://mock-exchange
       CTM_SERVER: demo-poc-ctm
       CTM_APPLICATION: exchange-data-platform
       CTM_SUB_APPLICATION: derivatives
@@ -344,6 +377,38 @@ services:
       - ./services/controlm-sim:/app
       - ./services/pipeline-runner:/app/pipeline-runner
       - ./services/market-mock:/app/market-mock
+      - controlm-sim-data:/data
+
+  # ── Demo cron sidecar ─────────────────────────────────────────────────────
+  # Rotates demo scenarios every INTERVAL_SECONDS to keep Datadog populated
+  # with continuous DJM/Lineage/DBM activity. Avoids macOS TCC blocking
+  # launchd from accessing ~/Documents. Stop with `podman compose stop demo-cron`.
+  demo-cron:
+    profiles: ["cron"]
+    build: ./services/cron-sidecar
+    image: b3-cron-sidecar:latest
+    container_name: demo-cron
+    privileged: true
+    user: "0:0"
+    environment:
+      INTERVAL_SECONDS: "900"
+      REPO: /repo
+    volumes:
+      - .:/repo:ro
+      - ./logs:/repo/logs
+      - ./services/cron-sidecar:/cron:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"shell","service":"demo-cron"}]'
+      com.datadoghq.tags.env: "demo"
+      com.datadoghq.tags.service: "demo-cron"
+    depends_on:
+      controlm-sim:
+        condition: service_started
+      pipeline-runner:
+        condition: service_started
+      market-mock:
+        condition: service_started
 
   controlm-workbench:
     profiles: ["workbench"]
@@ -357,6 +422,12 @@ services:
       DD_TRACE_AGENT_PORT: "8126"
       DD_API_KEY: ${DD_API_KEY}
       DD_SITE: ${DD_SITE:-datadoghq.com}
+      OL_NAMESPACE: b3-poc-demo-v3
+      OL_PIPELINE: b3_d1_pipeline
+      OL_EVENT_TIME_SHIFT_HOURS: "3"
+      OL_ORACLE_NS: oracle://demo-oracle:1521
+      OL_SQLSERVER_NS: sqlserver://demo-sqlserver:1433
+      OL_S3_NS: s3://mock-exchange
       PIPELINE_CONTAINER: demo-pipeline-runner
     labels:
       com.datadoghq.ad.logs: '[{"source":"controlm","service":"controlm-workbench"}]'
@@ -377,3 +448,13 @@ volumes:
   minio_data:
   oracle_data:
   sqlserver_data:
+  controlm-sim-data:
+
+# Rede dedicada para a POC — isola este stack de outros projetos com Datadog Agent
+# (ex: outro projeto DogBank rodando em paralelo na mesma máquina). Todos os
+# serviços abaixo entram nessa rede automaticamente por causa de `networks:` no
+# default top-level (compose v3 cria a rede com este nome explícito).
+networks:
+  default:
+    name: b3-network
+    driver: bridge

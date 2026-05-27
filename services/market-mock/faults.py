@@ -104,14 +104,17 @@ def duplicate_trade_mvmt(mysql_conn, business_date):
     print(f"[faults] MySQL: duplicated {mysql_inserted} trades in raw_trades", flush=True)
 
     # ── Oracle ASTADRVT_TRADE_MVMT ─────────────────────────────────────────
+    # Best-effort: the live Oracle schema may differ from the faults schema —
+    # if it does, skip Oracle silently and continue to SQL Server (DW), which is
+    # what the quality_gate actually inspects.
     ora_conn = _get_oracle_conn()
     if ora_conn:
         try:
             ora_cur = ora_conn.cursor()
             ora_cur.execute(
                 """
-                SELECT trade_id, ticker, notional, quantity, trade_dt,
-                       settlement_dt, counterparty_id, trader_id, desk_code, status
+                SELECT trade_id, instrument_code, buy_participant, sell_participant,
+                       quantity, closing_price, gross_value, trade_dt, settlement_dt, status
                 FROM ASTADRVT_TRADE_MVMT
                 WHERE trade_dt = TO_DATE(:bdate, 'YYYY-MM-DD')
                 ORDER BY DBMS_RANDOM.VALUE
@@ -126,11 +129,12 @@ def duplicate_trade_mvmt(mysql_conn, business_date):
                     ora_cur.execute(
                         """
                         INSERT INTO ASTADRVT_TRADE_MVMT
-                            (trade_id, ticker, notional, quantity, trade_dt,
-                             settlement_dt, counterparty_id, trader_id, desk_code, status)
-                        VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10)
+                            (trade_id, instrument_code, buy_participant, sell_participant,
+                             quantity, closing_price, gross_value, trade_dt, settlement_dt,
+                             status, business_date)
+                        VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, TO_DATE(:11, 'YYYY-MM-DD'))
                         """,
-                        row,
+                        list(row) + [business_date],
                     )
                     count += 1
                 except Exception as e:
@@ -138,6 +142,8 @@ def duplicate_trade_mvmt(mysql_conn, business_date):
             ora_conn.commit()
             ora_cur.close()
             print(f"[faults] Oracle: duplicated {count} rows in ASTADRVT_TRADE_MVMT", flush=True)
+        except Exception as e:
+            print(f"[faults] Oracle Caso 1 skipped (schema mismatch?): {e}", flush=True)
         finally:
             ora_conn.close()
 
@@ -200,23 +206,24 @@ def null_settlement_price(mysql_conn, business_date):
     print(f"[faults] [Caso 2] injecting null settlement_price for {business_date}", flush=True)
 
     # ── Oracle ASTANO_FGBE_DRVT_PSTN ──────────────────────────────────────
+    # Best-effort: Oracle schema uses MARKET_VALUE (not settlement_price).
+    # We try the analogous column; if schema differs, skip and continue to SQL Server.
     ora_conn = _get_oracle_conn()
     if ora_conn:
         try:
             ora_cur = ora_conn.cursor()
-            # Count total rows for the date
             ora_cur.execute(
                 "SELECT COUNT(*) FROM ASTANO_FGBE_DRVT_PSTN "
                 "WHERE position_date = TO_DATE(:bdate, 'YYYY-MM-DD')",
                 bdate=business_date,
             )
             total = ora_cur.fetchone()[0]
-            target = max(1, int(total * 0.05))  # 5% or at least 1
+            target = max(1, int(total * 0.05))
 
             ora_cur.execute(
                 """
                 UPDATE ASTANO_FGBE_DRVT_PSTN
-                SET settlement_price = NULL
+                SET market_value = NULL
                 WHERE position_id IN (
                     SELECT position_id FROM (
                         SELECT position_id FROM ASTANO_FGBE_DRVT_PSTN
@@ -231,11 +238,13 @@ def null_settlement_price(mysql_conn, business_date):
             )
             ora_conn.commit()
             print(
-                f"[faults] Oracle: set settlement_price=NULL for {target} rows "
+                f"[faults] Oracle: set market_value=NULL for {target} rows "
                 f"in ASTANO_FGBE_DRVT_PSTN",
                 flush=True,
             )
             ora_cur.close()
+        except Exception as e:
+            print(f"[faults] Oracle Caso 2 skipped (schema mismatch?): {e}", flush=True)
         finally:
             ora_conn.close()
 
@@ -287,6 +296,8 @@ def zero_sum_position(mysql_conn, business_date):
     num_zero_rows = 5
 
     # ── Oracle ASTACASH_MRKT_PSTN ─────────────────────────────────────────
+    # Best-effort: Oracle schema uses INSTRUMENT_CODE/NET_QUANTITY/SETTLEMENT_VALUE.
+    # We map zero-sum semantics onto NET_QUANTITY=0 (long+short=0 equivalent).
     ora_conn = _get_oracle_conn()
     if ora_conn:
         try:
@@ -295,15 +306,15 @@ def zero_sum_position(mysql_conn, business_date):
                 pos_id   = str(uuid.uuid4())
                 ticker   = TICKERS[i % len(TICKERS)]
                 part     = PARTICIPANTS[i % len(PARTICIPANTS)]
-                value    = round(random.uniform(1000, 50000), 4)
                 ora_cur.execute(
                     """
                     INSERT INTO ASTACASH_MRKT_PSTN
-                        (position_id, ticker, participant_code, position_date,
-                         long_value, short_value, net_value)
-                    VALUES (:1, :2, :3, TO_DATE(:4, 'YYYY-MM-DD'), :5, :6, :7)
+                        (position_id, instrument_code, participant_code, position_date,
+                         net_quantity, settlement_value, business_date)
+                    VALUES (:1, :2, :3, TO_DATE(:4, 'YYYY-MM-DD'), :5, :6,
+                            TO_DATE(:4, 'YYYY-MM-DD'))
                     """,
-                    (pos_id, ticker, part, business_date, value, -value, 0.0),
+                    (pos_id, ticker, part, business_date, 0, 0.0),
                 )
             ora_conn.commit()
             print(
@@ -311,6 +322,8 @@ def zero_sum_position(mysql_conn, business_date):
                 flush=True,
             )
             ora_cur.close()
+        except Exception as e:
+            print(f"[faults] Oracle Caso 3 skipped (schema mismatch?): {e}", flush=True)
         finally:
             ora_conn.close()
 

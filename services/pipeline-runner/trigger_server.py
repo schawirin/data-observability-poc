@@ -19,6 +19,12 @@ import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from lineage_contract import (
+    JOB_IO as _JOB_IO,
+    JOB_NAMESPACE as _OL_NS,
+    PIPELINE_NAME as _OL_PIPELINE,
+)
+
 # ── Datadog APM Tracer (ddtrace 4.6.1 installed) ────────────────────────────
 try:
     from ddtrace import tracer as dd_tracer, config as dd_config, patch
@@ -48,24 +54,10 @@ _DD_AGENT_HOST  = os.environ.get("DD_AGENT_HOST", "dd-agent")
 _DD_TRACE_PORT  = os.environ.get("DD_TRACE_AGENT_PORT", "8126")
 _DD_SITE        = os.environ.get("DD_SITE", "datadoghq.com")
 _DD_API_KEY     = os.environ.get("DD_API_KEY", "")
-_OL_NS          = os.environ.get("OL_NAMESPACE", "exchange-poc")
-_OL_PIPELINE    = os.environ.get("OL_PIPELINE",  "market_d1_pipeline")
-_OL_PRODUCER    = "https://github.com/exchange-poc/pipeline-runner"
-_OL_SCHEMA      = "https://openlineage.io/spec/1-0-5/OpenLineage.json#/$defs/RunEvent"
+_OL_PRODUCER    = "https://github.com/b3-poc/pipeline-runner"
+_OL_SCHEMA      = "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunEvent"
 _AGENT_OL_URL   = f"http://{_DD_AGENT_HOST}:{_DD_TRACE_PORT}/openlineage/api/v1/lineage"
 _DIRECT_OL_URL  = f"https://data-obs-intake.{_DD_SITE}/api/v1/lineage"
-
-# Dataset namespaces
-_ORACLE_NS  = f"oracle://{os.environ.get('ORACLE_HOST','demo-oracle')}:1521/{os.environ.get('ORACLE_SERVICE','XEPDB1')}"
-_SS_NS      = f"sqlserver://{os.environ.get('SQLSERVER_HOST','demo-sqlserver')}:1433/{os.environ.get('SQLSERVER_DATABASE','demopoc')}"
-_S3_NS      = "s3://mock-exchange"
-
-_JOB_IO = {
-    "close_market_eod":       {"inputs": [(_ORACLE_NS, "DEMOPOC.ASTADRVT_TRADE_MVMT")],         "outputs": [(_SS_NS, "dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO")]},
-    "reconcile_d1_positions": {"inputs": [(_ORACLE_NS, "DEMOPOC.ASTANO_FGBE_DRVT_PSTN"), (_ORACLE_NS, "DEMOPOC.ASTACASH_MRKT_PSTN")], "outputs": [(_SS_NS, "dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL"), (_SS_NS, "dbo.ADWPM_POSICAO_MERCADO_A_VISTA")]},
-    "quality_gate_d1":        {"inputs": [(_SS_NS, "dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO")], "outputs": [(_SS_NS, "dbo.ADWPM_DQ_RESULTS")]},
-    "publish_d1_reports":     {"inputs": [(_SS_NS, "dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO")], "outputs": [(_S3_NS, "derivatives/ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO")]},
-}
 
 _pipeline_run_id = str(uuid.uuid4())  # reset per server start
 
@@ -97,20 +89,22 @@ def _ol_job_start(job_name: str, run_id: str, business_date: str) -> None:
         "producer": _OL_PRODUCER,
         "schemaURL": _OL_SCHEMA,
         "run": {"runId": run_id, "facets": {
-            "parent": {"_producer": _OL_PRODUCER,
-                       "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/ParentRunFacet.json",
-                       "run": {"runId": _pipeline_run_id},
-                       "job": {"namespace": _OL_NS, "name": _OL_PIPELINE}},
+            "controlm": {"_producer": _OL_PRODUCER,
+                         "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/CustomFacet.json",
+                         "orchestrator": "control-m",
+                         "pipeline": _OL_PIPELINE,
+                         "pipelineRunId": _pipeline_run_id,
+                         "wrapper": "pipeline-runner"},
             "nominalTime": {"_producer": _OL_PRODUCER,
                             "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/NominalTimeRunFacet.json",
                             "nominalStartTime": f"{business_date}T00:00:00+00:00"},
         }},
         "job": {"namespace": _OL_NS, "name": job_name,
                 "facets": {"jobType": {"_producer": _OL_PRODUCER,
-                                       "_schemaURL": "https://openlineage.io/spec/facets/1-1-1/JobTypeJobFacet.json",
-                                       "processingType": "BATCH", "integration": "CONTROL_M", "jobType": "JOB"}}},
-        "inputs":  [{"namespace": ns, "name": name, "facets": {}} for ns, name in io.get("inputs", [])],
-        "outputs": [{"namespace": ns, "name": name, "facets": {}} for ns, name in io.get("outputs", [])],
+                                       "_schemaURL": "https://openlineage.io/spec/facets/2-0-3/JobTypeJobFacet.json",
+                                       "processingType": "BATCH", "integration": "custom", "jobType": "JOB"}}},
+        "inputs":  [{"namespace": d["namespace"], "name": d["name"], "facets": {}} for d in io.get("inputs", [])],
+        "outputs": [{"namespace": d["namespace"], "name": d["name"], "facets": {}} for d in io.get("outputs", [])],
     })
 
 
@@ -119,10 +113,12 @@ def _ol_job_end(job_name: str, run_id: str, business_date: str, success: bool,
     io = _JOB_IO.get(job_name, {})
     event_type = "COMPLETE" if success else "FAIL"
     run_facets: dict = {
-        "parent": {"_producer": _OL_PRODUCER,
-                   "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/ParentRunFacet.json",
-                   "run": {"runId": _pipeline_run_id},
-                   "job": {"namespace": _OL_NS, "name": _OL_PIPELINE}},
+        "controlm": {"_producer": _OL_PRODUCER,
+                     "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/CustomFacet.json",
+                     "orchestrator": "control-m",
+                     "pipeline": _OL_PIPELINE,
+                     "pipelineRunId": _pipeline_run_id,
+                     "wrapper": "pipeline-runner"},
     }
     if not success and result.get("error"):
         run_facets["errorMessage"] = {
@@ -147,16 +143,18 @@ def _ol_job_end(job_name: str, run_id: str, business_date: str, success: bool,
         "run": {"runId": run_id, "facets": run_facets},
         "job": {"namespace": _OL_NS, "name": job_name,
                 "facets": {"jobType": {"_producer": _OL_PRODUCER,
-                                       "_schemaURL": "https://openlineage.io/spec/facets/1-1-1/JobTypeJobFacet.json",
-                                       "processingType": "BATCH", "integration": "CONTROL_M", "jobType": "JOB"}}},
-        "inputs":  [{"namespace": ns, "name": name, "facets": {}} for ns, name in io.get("inputs", [])],
-        "outputs": [{"namespace": ns, "name": name, "facets": output_facets} for ns, name in io.get("outputs", [])],
+                                       "_schemaURL": "https://openlineage.io/spec/facets/2-0-3/JobTypeJobFacet.json",
+                                       "processingType": "BATCH", "integration": "custom", "jobType": "JOB"}}},
+        "inputs":  [{"namespace": d["namespace"], "name": d["name"], "facets": {}} for d in io.get("inputs", [])],
+        "outputs": [{"namespace": d["namespace"], "name": d["name"], "facets": {}, "outputFacets": output_facets} for d in io.get("outputs", [])],
     })
 
 
 def _now() -> str:
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat()
+    from datetime import datetime, timedelta, timezone
+    shift_hours = float(os.environ.get("OL_EVENT_TIME_SHIFT_HOURS", "0"))
+    now = datetime.now(timezone.utc) + timedelta(hours=shift_hours)
+    return now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 # ── SQL Server DW connection settings ────────────────────────────────────────
 SQLSERVER_HOST     = os.environ.get("SQLSERVER_HOST",     "demoorg-sqlserver")

@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>B3 — Arquitetura Control-M + Datadog (Produção)</title>
+<style>
+  :root {
+    --bg:         #0F1B2E;
+    --surface:    #1A2A42;
+    --surface2:   #243752;
+    --border:     #3A4D63;
+    --border-soft:#324559;
+    --text:       #E8EEF5;
+    --text-dim:   #8B9CB0;
+    --accent:     #0091D5;   /* CTM blue */
+    --accent-bright:#1FA8E0;
+    --dd-purple:  #7C3AED;   /* Datadog brand */
+    --dd-purple-dim:#5B21B6;
+
+    /* signal colors */
+    --sig-apm:    #7C3AED;
+    --sig-metric: #0091D5;
+    --sig-log:    #2E9E3F;
+    --sig-lineage:#E8A33F;
+    --sig-dbm:    #D63841;
+
+    --zone-onprem: #1F4287;
+    --zone-cloud:  #38166B;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: "Segoe UI", -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px 32px;
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+
+  .header {
+    display: flex; align-items: center; gap: 14px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 14px;
+    margin-bottom: 22px;
+  }
+  .logo {
+    width: 44px; height: 44px;
+    border-radius: 6px;
+    background: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 900; color: #fff; letter-spacing: 0.5px;
+  }
+  h1 { font-size: 20px; font-weight: 700; }
+  h1 small { display:block; font-size: 12px; color: var(--text-dim); font-weight:400; margin-top:3px; letter-spacing:0.5px; text-transform:uppercase; }
+  h2 { font-size: 14px; margin: 30px 0 14px; color: var(--accent-bright); text-transform: uppercase; letter-spacing: 1px; }
+  h3 { font-size: 13px; color: var(--text); margin: 16px 0 8px; }
+  p, li { color: var(--text-dim); font-size: 13px; }
+  li { margin-left: 18px; }
+  strong { color: var(--text); font-weight: 600; }
+
+  .diagram-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    overflow-x: auto;
+  }
+
+  .legend {
+    display: flex; gap: 18px; flex-wrap: wrap;
+    margin: 14px 0 4px;
+    padding: 10px 14px;
+    background: var(--surface2);
+    border-radius: 6px;
+    border: 1px solid var(--border-soft);
+    font-size: 12px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-line { width: 24px; height: 3px; border-radius: 2px; }
+
+  .matrix-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 12px;
+  }
+  .matrix-table th, .matrix-table td {
+    padding: 9px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-soft);
+    vertical-align: top;
+  }
+  .matrix-table thead tr { background: var(--surface2); }
+  .matrix-table th {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 700;
+  }
+  .matrix-table td:first-child { font-weight: 600; color: var(--text); width: 24%; }
+  .matrix-table td.same { color: #6B9F6F; }
+  .matrix-table td.change { color: var(--sig-lineage); }
+  .matrix-table td.new { color: var(--accent-bright); }
+  .badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-left: 4px;
+  }
+  .badge-same   { background: rgba(107,159,111,0.18); color: #6B9F6F; border:1px solid #6B9F6F;}
+  .badge-change { background: rgba(232,163,63,0.18); color: var(--sig-lineage); border:1px solid var(--sig-lineage);}
+  .badge-new    { background: rgba(0,145,213,0.18); color: var(--accent-bright); border:1px solid var(--accent);}
+
+  .columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-top: 8px;
+  }
+  .col {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+  }
+  .col h3 { margin-top: 0; color: var(--accent-bright); font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; }
+  .col p, .col li { font-size: 12px; }
+
+  .footer-note {
+    margin-top: 30px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 4px 4px 0;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .check { color: #6B9F6F; font-weight: 700; }
+  .warn  { color: var(--sig-lineage); font-weight: 700; }
+  .fail  { color: var(--sig-dbm); font-weight: 700; }
+
+  .toolbar-buttons {
+    display: flex; gap: 8px; margin-left: auto;
+    font-size: 11px;
+  }
+  .btn-print {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+  }
+  .btn-print:hover { background: var(--surface); border-color: var(--accent); }
+
+  /* SVG styling */
+  svg .zone-label {
+    font-family: "Segoe UI", sans-serif;
+    font-size: 11px;
+    fill: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    font-weight: 700;
+  }
+  svg .box-title {
+    font-family: "Segoe UI", sans-serif;
+    font-size: 12px;
+    fill: var(--text);
+    font-weight: 700;
+  }
+  svg .box-sub {
+    font-family: "SF Mono", monospace;
+    font-size: 10px;
+    fill: var(--text-dim);
+  }
+  svg .flow-label {
+    font-family: "Segoe UI", sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">B3</div>
+  <h1>
+    Arquitetura Control-M + Datadog em Produção
+    <small>POC ⟶ Implementação Real · 2026-05-20</small>
+  </h1>
+  <div class="toolbar-buttons">
+    <button class="btn-print" onclick="window.print()">Print / PDF</button>
+  </div>
+</div>
+
+<h2>1 · Diagrama da arquitetura proposta</h2>
+
+<div class="diagram-wrap">
+  <svg viewBox="0 0 1400 760" width="100%" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <!-- Arrow markers per signal type -->
+      <marker id="ar-apm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#7C3AED"/>
+      </marker>
+      <marker id="ar-metric" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#0091D5"/>
+      </marker>
+      <marker id="ar-log" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#2E9E3F"/>
+      </marker>
+      <marker id="ar-lineage" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#E8A33F"/>
+      </marker>
+      <marker id="ar-dbm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#D63841"/>
+      </marker>
+      <marker id="ar-job" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#8B9CB0"/>
+      </marker>
+    </defs>
+
+    <!-- ───────── ZONE 1: ON-PREM B3 ───────── -->
+    <rect x="20" y="40" width="900" height="700" rx="10"
+          fill="#11253F" stroke="#1F4287" stroke-width="2" stroke-dasharray="4,4"/>
+    <text x="40" y="65" class="zone-label">On-prem · B3 datacenter</text>
+
+    <!-- Control-M EM/Server (top) -->
+    <g>
+      <rect x="60" y="100" width="240" height="80" rx="6" fill="#243752" stroke="#0091D5" stroke-width="1.5"/>
+      <text x="180" y="125" text-anchor="middle" class="box-title">Control-M EM</text>
+      <text x="180" y="143" text-anchor="middle" class="box-sub">+ Control-M Server</text>
+      <text x="180" y="163" text-anchor="middle" class="box-sub" fill="#8B9CB0">orquestrador · schedule · planning</text>
+    </g>
+
+    <!-- Job:Command JSON (between EM and Agent) -->
+    <g>
+      <rect x="350" y="105" width="270" height="75" rx="6" fill="#1A2A42" stroke="#324559" stroke-width="1" stroke-dasharray="3,2"/>
+      <text x="485" y="125" text-anchor="middle" class="box-title" fill="#1FA8E0">Job:Command (definição)</text>
+      <text x="485" y="143" text-anchor="middle" class="box-sub" fill="#E8A33F" style="font-size:9px">
+        Command = "ddtrace-run python pipe.py"
+      </text>
+      <text x="485" y="158" text-anchor="middle" class="box-sub" fill="#8B9CB0">
+        PreCommand: export DD_SERVICE, DD_TAGS
+      </text>
+      <text x="485" y="171" text-anchor="middle" class="box-sub" fill="#8B9CB0">
+        vars: %%ODATE %%ORDERID %%JOBNAME
+      </text>
+    </g>
+
+    <!-- Arrow EM→JSON -->
+    <line x1="300" y1="140" x2="350" y2="140" stroke="#8B9CB0" stroke-width="2" marker-end="url(#ar-job)"/>
+
+    <!-- ─── Control-M Agent host (center) ─── -->
+    <rect x="60" y="240" width="820" height="320" rx="8"
+          fill="#0F2238" stroke="#3A4D63" stroke-width="1.5"/>
+    <text x="80" y="265" class="zone-label" fill="#1FA8E0">Host: ctm-agent-prd-01 (Linux)</text>
+
+    <!-- Control-M Agent process -->
+    <g>
+      <rect x="90" y="290" width="170" height="70" rx="5" fill="#243752" stroke="#0091D5" stroke-width="1"/>
+      <text x="175" y="315" text-anchor="middle" class="box-title">Control-M Agent</text>
+      <text x="175" y="332" text-anchor="middle" class="box-sub" fill="#8B9CB0">recebe job order</text>
+      <text x="175" y="347" text-anchor="middle" class="box-sub" fill="#8B9CB0">grava sysout em /sysout/</text>
+    </g>
+
+    <!-- Job process: Python -->
+    <g>
+      <rect x="310" y="290" width="200" height="160" rx="5" fill="#1A2A42" stroke="#1FA8E0" stroke-width="2"/>
+      <text x="410" y="313" text-anchor="middle" class="box-title">Job process</text>
+      <text x="410" y="330" text-anchor="middle" class="box-sub" fill="#1FA8E0" style="font-size:11px;font-weight:700">
+        ddtrace-run python
+      </text>
+      <text x="410" y="346" text-anchor="middle" class="box-sub" fill="#1FA8E0" style="font-size:11px;font-weight:700">
+        pipeline.py
+      </text>
+      <line x1="320" y1="360" x2="500" y2="360" stroke="#324559" stroke-width="1"/>
+      <text x="410" y="378" text-anchor="middle" class="box-sub" fill="#7C3AED" style="font-size:9px">▣ APM traces (ddtrace)</text>
+      <text x="410" y="395" text-anchor="middle" class="box-sub" fill="#0091D5" style="font-size:9px">▣ DogStatsD metrics</text>
+      <text x="410" y="412" text-anchor="middle" class="box-sub" fill="#E8A33F" style="font-size:9px">▣ OpenLineage events</text>
+      <text x="410" y="429" text-anchor="middle" class="box-sub" fill="#2E9E3F" style="font-size:9px">▣ stdout/stderr</text>
+      <text x="410" y="446" text-anchor="middle" class="box-sub" fill="#8B9CB0" style="font-size:9px">↓ pyodbc/oracledb → DBs</text>
+    </g>
+
+    <!-- Sysout file -->
+    <g>
+      <rect x="310" y="475" width="200" height="55" rx="5" fill="#0F1B2E" stroke="#2E9E3F" stroke-width="1" stroke-dasharray="3,2"/>
+      <text x="410" y="496" text-anchor="middle" class="box-title" style="font-size:11px">Sysout file</text>
+      <text x="410" y="513" text-anchor="middle" class="box-sub" fill="#8B9CB0" style="font-size:9px">/var/ctm/sysout/JOB_%ORDERID.log</text>
+    </g>
+
+    <!-- Datadog Agent (local sidecar) -->
+    <g>
+      <rect x="570" y="290" width="240" height="240" rx="6" fill="#241638" stroke="#7C3AED" stroke-width="2"/>
+      <text x="690" y="315" text-anchor="middle" class="box-title">Datadog Agent</text>
+      <text x="690" y="332" text-anchor="middle" class="box-sub" fill="#B080D0">(local · sidecar)</text>
+      <line x1="585" y1="345" x2="800" y2="345" stroke="#3A4D63" stroke-width="1"/>
+
+      <text x="585" y="365" class="box-sub" fill="#7C3AED" style="font-size:10px;font-weight:700">▣ Trace Agent :8126</text>
+      <text x="590" y="380" class="box-sub" fill="#8B9CB0" style="font-size:9px">→ APM intake</text>
+      <text x="590" y="394" class="box-sub" fill="#8B9CB0" style="font-size:9px">→ /openlineage/api/v1/lineage</text>
+
+      <text x="585" y="412" class="box-sub" fill="#0091D5" style="font-size:10px;font-weight:700">▣ DogStatsD :8125 (UDP)</text>
+      <text x="590" y="426" class="box-sub" fill="#8B9CB0" style="font-size:9px">→ metrics intake</text>
+
+      <text x="585" y="444" class="box-sub" fill="#2E9E3F" style="font-size:10px;font-weight:700">▣ Logs Agent (file tail)</text>
+      <text x="590" y="458" class="box-sub" fill="#8B9CB0" style="font-size:9px">→ /var/ctm/sysout/*.log</text>
+      <text x="590" y="471" class="box-sub" fill="#8B9CB0" style="font-size:9px">→ log_processing_rules</text>
+
+      <text x="585" y="490" class="box-sub" fill="#D63841" style="font-size:10px;font-weight:700">▣ DBM checks</text>
+      <text x="590" y="504" class="box-sub" fill="#8B9CB0" style="font-size:9px">→ Oracle / SQL Server / etc</text>
+      <text x="590" y="517" class="box-sub" fill="#8B9CB0" style="font-size:9px">query_metrics + execution_plans</text>
+    </g>
+
+    <!-- ─── Databases (bottom) ─── -->
+    <g>
+      <rect x="60" y="600" width="820" height="120" rx="6" fill="#0F2238" stroke="#3A4D63" stroke-width="1"/>
+      <text x="80" y="624" class="zone-label" fill="#D63841">Bancos de dados</text>
+
+      <g>
+        <rect x="90" y="640" width="140" height="60" rx="4" fill="#243752" stroke="#D63841" stroke-width="1.5"/>
+        <text x="160" y="660" text-anchor="middle" class="box-title" style="font-size:11px">Oracle XE 21</text>
+        <text x="160" y="676" text-anchor="middle" class="box-sub" style="font-size:9px">DEMOPOC schema</text>
+        <text x="160" y="690" text-anchor="middle" class="box-sub" style="font-size:9px">ASTADRVT_*, ASTANO_*, ASTACASH_*</text>
+      </g>
+      <g>
+        <rect x="245" y="640" width="140" height="60" rx="4" fill="#243752" stroke="#D63841" stroke-width="1.5"/>
+        <text x="315" y="660" text-anchor="middle" class="box-title" style="font-size:11px">SQL Server 2022</text>
+        <text x="315" y="676" text-anchor="middle" class="box-sub" style="font-size:9px">demopoc DB · dbo schema</text>
+        <text x="315" y="690" text-anchor="middle" class="box-sub" style="font-size:9px">ADWPM_* (DW)</text>
+      </g>
+      <g>
+        <rect x="400" y="640" width="140" height="60" rx="4" fill="#243752" stroke="#3A4D63" stroke-width="1.5"/>
+        <text x="470" y="660" text-anchor="middle" class="box-title" style="font-size:11px">MySQL 8.0</text>
+        <text x="470" y="676" text-anchor="middle" class="box-sub" style="font-size:9px">exchange · legacy</text>
+      </g>
+      <g>
+        <rect x="555" y="640" width="140" height="60" rx="4" fill="#243752" stroke="#3A4D63" stroke-width="1.5"/>
+        <text x="625" y="660" text-anchor="middle" class="box-title" style="font-size:11px">Postgres 16</text>
+        <text x="625" y="676" text-anchor="middle" class="box-sub" style="font-size:9px">dbt transforms</text>
+      </g>
+      <g>
+        <rect x="710" y="640" width="150" height="60" rx="4" fill="#243752" stroke="#3A4D63" stroke-width="1.5"/>
+        <text x="785" y="660" text-anchor="middle" class="box-title" style="font-size:11px">MinIO (S3)</text>
+        <text x="785" y="676" text-anchor="middle" class="box-sub" style="font-size:9px">Parquet/CSV exports</text>
+      </g>
+    </g>
+
+    <!-- ───────── ZONE 2: DATADOG CLOUD ───────── -->
+    <rect x="960" y="40" width="420" height="700" rx="10"
+          fill="#1B0F38" stroke="#38166B" stroke-width="2" stroke-dasharray="4,4"/>
+    <text x="980" y="65" class="zone-label" fill="#B080D0">Datadog Cloud (us1)</text>
+
+    <!-- APM -->
+    <g>
+      <rect x="990" y="100" width="360" height="80" rx="5" fill="#241638" stroke="#7C3AED" stroke-width="1.5"/>
+      <text x="1170" y="122" text-anchor="middle" class="box-title">APM &amp; Service Catalog</text>
+      <text x="1170" y="140" text-anchor="middle" class="box-sub" fill="#B080D0">traces · service map · flame graphs</text>
+      <text x="1170" y="158" text-anchor="middle" class="box-sub" fill="#8B9CB0" style="font-size:9px">service: b3-pipeline · resource: oracle.query</text>
+    </g>
+
+    <!-- Metrics -->
+    <g>
+      <rect x="990" y="200" width="360" height="80" rx="5" fill="#0F2A45" stroke="#0091D5" stroke-width="1.5"/>
+      <text x="1170" y="222" text-anchor="middle" class="box-title">Metrics &amp; Dashboards</text>
+      <text x="1170" y="240" text-anchor="middle" class="box-sub" fill="#1FA8E0">controlm.job.* · custom · DBM</text>
+      <text x="1170" y="258" text-anchor="middle" class="box-sub" fill="#8B9CB0" style="font-size:9px">Job Health Dashboard · btb-q3f-ry7</text>
+    </g>
+
+    <!-- Logs -->
+    <g>
+      <rect x="990" y="300" width="360" height="80" rx="5" fill="#0F2D1A" stroke="#2E9E3F" stroke-width="1.5"/>
+      <text x="1170" y="322" text-anchor="middle" class="box-title">Logs Explorer</text>
+      <text x="1170" y="340" text-anchor="middle" class="box-sub" fill="#6B9F6F">sysout indexed · ctm_job facets</text>
+      <text x="1170" y="358" text-anchor="middle" class="box-sub" fill="#8B9CB0" style="font-size:9px">grok pipeline · log-to-metric</text>
+    </g>
+
+    <!-- DJM / Lineage -->
+    <g>
+      <rect x="990" y="400" width="360" height="80" rx="5" fill="#3D2E14" stroke="#E8A33F" stroke-width="1.5"/>
+      <text x="1170" y="422" text-anchor="middle" class="box-title">Data Jobs Monitoring</text>
+      <text x="1170" y="440" text-anchor="middle" class="box-sub" fill="#E8A33F">OpenLineage runs · Lineage graph</text>
+      <text x="1170" y="458" text-anchor="middle" class="box-sub" fill="#8B9CB0" style="font-size:9px">PREVIEW · requires CSM enable</text>
+    </g>
+
+    <!-- DBM -->
+    <g>
+      <rect x="990" y="500" width="360" height="80" rx="5" fill="#3D1A1E" stroke="#D63841" stroke-width="1.5"/>
+      <text x="1170" y="522" text-anchor="middle" class="box-title">Database Monitoring</text>
+      <text x="1170" y="540" text-anchor="middle" class="box-sub" fill="#F47476">top queries · explain · waits · blocking</text>
+      <text x="1170" y="558" text-anchor="middle" class="box-sub" fill="#8B9CB0" style="font-size:9px">all 4 DBs (Oracle, SQL Server, MySQL, Pg)</text>
+    </g>
+
+    <!-- Custom Job Health dashboard -->
+    <g>
+      <rect x="990" y="600" width="360" height="120" rx="5" fill="#1A2A42" stroke="#1FA8E0" stroke-width="2"/>
+      <text x="1170" y="622" text-anchor="middle" class="box-title" fill="#1FA8E0">Custom Job Health Dashboard</text>
+      <text x="1170" y="640" text-anchor="middle" class="box-sub" fill="#8B9CB0">correlaciona todos os sinais por ctm_job</text>
+      <text x="1010" y="660" class="box-sub" fill="#7C3AED" style="font-size:10px">✓ Status execution</text>
+      <text x="1170" y="660" text-anchor="middle" class="box-sub" fill="#0091D5" style="font-size:10px">✓ DBM top queries</text>
+      <text x="1340" y="660" text-anchor="end" class="box-sub" fill="#D63841" style="font-size:10px">✓ Locks/deadlocks</text>
+      <text x="1010" y="678" class="box-sub" fill="#2E9E3F" style="font-size:10px">✓ Logs (ctm_job)</text>
+      <text x="1170" y="678" text-anchor="middle" class="box-sub" fill="#8B9CB0" style="font-size:10px">✓ Row count src/tgt</text>
+      <text x="1340" y="678" text-anchor="end" class="box-sub" fill="#E8A33F" style="font-size:10px">✓ SLO compliance</text>
+      <text x="1170" y="703" text-anchor="middle" class="box-sub" fill="#8B9CB0" style="font-size:9px">eum-crb-qcm</text>
+    </g>
+
+    <!-- ─── ARROWS Job order flow ─── -->
+    <line x1="180" y1="180" x2="180" y2="290" stroke="#8B9CB0" stroke-width="2" marker-end="url(#ar-job)"/>
+    <text x="195" y="240" class="flow-label" fill="#8B9CB0">job order</text>
+
+    <line x1="260" y1="325" x2="310" y2="325" stroke="#8B9CB0" stroke-width="2" marker-end="url(#ar-job)"/>
+    <text x="278" y="315" class="flow-label" fill="#8B9CB0" style="font-size:9px">exec</text>
+
+    <!-- Job process → Sysout -->
+    <line x1="410" y1="450" x2="410" y2="475" stroke="#2E9E3F" stroke-width="2" stroke-dasharray="4,2" marker-end="url(#ar-log)"/>
+    <text x="425" y="468" class="flow-label" fill="#2E9E3F" style="font-size:9px">stdout</text>
+
+    <!-- Job process → DD Agent (APM/StatsD/OL) -->
+    <path d="M 510 360 Q 545 360 570 360" stroke="#7C3AED" stroke-width="2" fill="none" marker-end="url(#ar-apm)"/>
+    <text x="520" y="355" class="flow-label" fill="#7C3AED" style="font-size:9px">APM</text>
+
+    <path d="M 510 395 Q 545 395 570 395" stroke="#0091D5" stroke-width="2" fill="none" marker-end="url(#ar-metric)"/>
+    <text x="520" y="390" class="flow-label" fill="#0091D5" style="font-size:9px">metric</text>
+
+    <path d="M 510 412 Q 545 412 570 412" stroke="#E8A33F" stroke-width="2" fill="none" marker-end="url(#ar-lineage)"/>
+    <text x="520" y="425" class="flow-label" fill="#E8A33F" style="font-size:9px">lineage</text>
+
+    <!-- Sysout → DD Agent -->
+    <path d="M 510 500 Q 540 500 570 470" stroke="#2E9E3F" stroke-width="2" fill="none" marker-end="url(#ar-log)"/>
+    <text x="520" y="495" class="flow-label" fill="#2E9E3F" style="font-size:9px">tail</text>
+
+    <!-- DBs → DD Agent (DBM) -->
+    <path d="M 160 640 Q 160 580 575 510" stroke="#D63841" stroke-width="2" fill="none" stroke-dasharray="4,3" marker-end="url(#ar-dbm)"/>
+    <path d="M 315 640 Q 315 580 575 510" stroke="#D63841" stroke-width="2" fill="none" stroke-dasharray="4,3"/>
+    <path d="M 470 640 Q 470 580 580 510" stroke="#D63841" stroke-width="2" fill="none" stroke-dasharray="4,3"/>
+    <path d="M 625 640 Q 625 580 585 510" stroke="#D63841" stroke-width="2" fill="none" stroke-dasharray="4,3"/>
+    <text x="200" y="572" class="flow-label" fill="#D63841" style="font-size:10px;font-weight:700">DBM</text>
+
+    <!-- Python → DBs (data path) -->
+    <path d="M 380 450 Q 380 500 220 640" stroke="#8B9CB0" stroke-width="1.5" fill="none" stroke-dasharray="2,3"/>
+    <path d="M 410 450 Q 410 500 315 640" stroke="#8B9CB0" stroke-width="1.5" fill="none" stroke-dasharray="2,3"/>
+    <text x="265" y="595" class="flow-label" fill="#8B9CB0" style="font-size:9px">SQL via driver</text>
+
+    <!-- ─── Cross-zone arrows ─── -->
+    <!-- DD Agent → APM -->
+    <path d="M 810 360 Q 900 360 990 140" stroke="#7C3AED" stroke-width="2.5" fill="none" marker-end="url(#ar-apm)"/>
+    <text x="900" y="240" class="flow-label" fill="#7C3AED" style="font-size:10px">HTTPS · APM</text>
+
+    <!-- DD Agent → Metrics -->
+    <path d="M 810 410 Q 900 410 990 240" stroke="#0091D5" stroke-width="2.5" fill="none" marker-end="url(#ar-metric)"/>
+    <text x="900" y="320" class="flow-label" fill="#0091D5" style="font-size:10px">HTTPS · metrics</text>
+
+    <!-- DD Agent → Logs -->
+    <path d="M 810 450 Q 900 450 990 340" stroke="#2E9E3F" stroke-width="2.5" fill="none" marker-end="url(#ar-log)"/>
+    <text x="900" y="395" class="flow-label" fill="#2E9E3F" style="font-size:10px">HTTPS · logs</text>
+
+    <!-- DD Agent → DJM -->
+    <path d="M 810 400 Q 920 400 990 430" stroke="#E8A33F" stroke-width="2.5" fill="none" marker-end="url(#ar-lineage)"/>
+    <text x="910" y="430" class="flow-label" fill="#E8A33F" style="font-size:10px">HTTPS · OL events</text>
+
+    <!-- DD Agent → DBM -->
+    <path d="M 810 510 Q 900 510 990 540" stroke="#D63841" stroke-width="2.5" fill="none" marker-end="url(#ar-dbm)"/>
+    <text x="900" y="540" class="flow-label" fill="#D63841" style="font-size:10px">HTTPS · DBM</text>
+  </svg>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><span class="legend-line" style="background:#7C3AED"></span> APM traces (ddtrace)</div>
+  <div class="legend-item"><span class="legend-line" style="background:#0091D5"></span> DogStatsD metrics (UDP)</div>
+  <div class="legend-item"><span class="legend-line" style="background:#2E9E3F"></span> Logs (sysout file tail)</div>
+  <div class="legend-item"><span class="legend-line" style="background:#E8A33F"></span> OpenLineage events</div>
+  <div class="legend-item"><span class="legend-line" style="background:#D63841"></span> DBM (Datadog → DB direct)</div>
+  <div class="legend-item"><span class="legend-line" style="background:#8B9CB0"></span> Control-M job execution</div>
+</div>
+
+<h2>2 · O que muda vs hoje na B3</h2>
+
+<table class="matrix-table">
+  <thead>
+    <tr>
+      <th>Camada</th>
+      <th>Hoje na B3</th>
+      <th>Depois da implementação</th>
+      <th>Impacto</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Control-M EM/Server</td>
+      <td>Já em produção</td>
+      <td>Sem alteração</td>
+      <td class="same"><span class="badge badge-same">igual</span></td>
+    </tr>
+    <tr>
+      <td>Definição do job</td>
+      <td>Job:Command rodando script de ETL</td>
+      <td>Job:Command com prefixo <code>ddtrace-run python …</code> + PreCommand <code>export DD_SERVICE/DD_ENV/DD_TAGS</code></td>
+      <td class="change"><span class="badge badge-change">edit</span> só campos Command/PreCommand</td>
+    </tr>
+    <tr>
+      <td>Control-M Variables</td>
+      <td>%%ODATE, %%ORDERID, %%JOBNAME já existem</td>
+      <td>Mesmas variáveis viram env vars Datadog (ctm_job:%%JOBNAME, order:%%ORDERID, odate:%%ODATE)</td>
+      <td class="same"><span class="badge badge-same">reuso</span></td>
+    </tr>
+    <tr>
+      <td>Script Python (pipeline)</td>
+      <td>Roda como CLI normal</td>
+      <td>Importa ddtrace + emite spans APM, métricas DogStatsD, eventos OpenLineage 1.37+ (DatadogTransport)</td>
+      <td class="new"><span class="badge badge-new">novo código</span></td>
+    </tr>
+    <tr>
+      <td>Bancos (Oracle/SQL Server/MySQL/Postgres)</td>
+      <td>Em produção</td>
+      <td>Datadog Agent conecta com user dedicado para DBM. Não toca em schema, dados ou conexões da aplicação</td>
+      <td class="change"><span class="badge badge-change">grants DBM</span></td>
+    </tr>
+    <tr>
+      <td>Datadog Agent</td>
+      <td>Não existe no host do Control-M Agent</td>
+      <td>Instalado no host do Control-M Agent. Coleta: APM (porta 8126), DogStatsD (UDP 8125), sysout (file tail), DBM (TCP → DBs), OpenLineage proxy</td>
+      <td class="new"><span class="badge badge-new">aprovação Ops</span></td>
+    </tr>
+    <tr>
+      <td>Conta Datadog (org B3)</td>
+      <td>(provavelmente já existe)</td>
+      <td>Precisa SKU APM + DBM + Logs + Data Jobs Monitoring (Preview, enable via CSM)</td>
+      <td class="change"><span class="badge badge-change">SKU/CSM</span></td>
+    </tr>
+    <tr>
+      <td>Application Integrator / Plug-in custom</td>
+      <td>n/a</td>
+      <td><strong>Não usado</strong></td>
+      <td class="same"><span class="badge badge-same">não precisa</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>3 · Padrão A vs Padrão A+B (decisão para Ops B3)</h2>
+
+<div class="columns">
+  <div class="col">
+    <h3>Padrão A — Só instrumentação no código</h3>
+    <p><strong>Quando usar:</strong> Ops B3 não quer mais um agent no host do Control-M Agent.</p>
+    <ul>
+      <li>Python emite tudo direto pro endpoint público Datadog (HTTPS).</li>
+      <li>✅ APM funciona (tráfego direto)</li>
+      <li>✅ Métricas funcionam (StatsD HTTP backend)</li>
+      <li>✅ OpenLineage funciona (DatadogTransport)</li>
+      <li class="warn">⚠️ Logs ficam só no sysout do Control-M — sem indexação Datadog</li>
+      <li class="warn">⚠️ DBM precisa rodar em outro host (não há Agent local)</li>
+      <li>Latência maior (HTTPS pra cada flush vs UDP local)</li>
+    </ul>
+  </div>
+  <div class="col">
+    <h3>Padrão A+B — Datadog Agent no host (recomendado)</h3>
+    <p><strong>Quando usar:</strong> POC séria, demo B3 com tudo visível.</p>
+    <ul>
+      <li>Mesmo Python instrumentado, mas envia para Agent local.</li>
+      <li>✅ APM via socket local (mais rápido)</li>
+      <li>✅ DogStatsD UDP local (perda zero em picos)</li>
+      <li>✅ Logs do sysout indexados automaticamente (file tail)</li>
+      <li>✅ DBM pode rodar no mesmo Agent (Oracle/SQL Server)</li>
+      <li>✅ OpenLineage proxy (com buffer/retry)</li>
+      <li>Requer aprovação Ops para instalar Datadog Agent</li>
+    </ul>
+  </div>
+</div>
+
+<h2>4 · O que cai onde no Datadog</h2>
+
+<table class="matrix-table">
+  <thead>
+    <tr>
+      <th>Sinal emitido</th>
+      <th>Produto Datadog</th>
+      <th>Onde aparece na UI</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>APM spans (ddtrace)</td>
+      <td>APM &amp; Service Catalog</td>
+      <td>APM › Services › b3-pipeline · Service Map</td>
+      <td class="same"><span class="check">GA</span></td>
+    </tr>
+    <tr>
+      <td>DogStatsD metrics</td>
+      <td>Metrics</td>
+      <td>Metric Explorer · Custom Job Health dashboard</td>
+      <td class="same"><span class="check">GA</span></td>
+    </tr>
+    <tr>
+      <td>Sysout (file logs)</td>
+      <td>Logs</td>
+      <td>Logs Explorer com facets <code>ctm_job</code>, <code>ctm_order_id</code>, <code>odate</code></td>
+      <td class="same"><span class="check">GA</span></td>
+    </tr>
+    <tr>
+      <td>OpenLineage events</td>
+      <td>Data Jobs Monitoring</td>
+      <td>Data Observability › Jobs Monitoring › lista de runs (cada run mostra lineage Oracle→SQL Server)</td>
+      <td class="warn"><span class="warn">PREVIEW</span> · enable via CSM</td>
+    </tr>
+    <tr>
+      <td>DBM (Datadog Agent → DB)</td>
+      <td>Database Monitoring</td>
+      <td>DBM › Oracle/SQL Server/MySQL/Postgres dashboards · Top queries</td>
+      <td class="same"><span class="check">GA</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>5 · Riscos e dependências externas</h2>
+
+<table class="matrix-table">
+  <thead>
+    <tr><th>Risco</th><th>Probabilidade</th><th>Mitigação</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Org Datadog da B3 sem SKU Data Jobs Monitoring (Preview)</td>
+      <td>Alta</td>
+      <td>Pedir CSM enable. Caso não rolar, lineage view fica vazia mas APM/DBM/Logs/Dashboard customizado seguem funcionando.</td>
+    </tr>
+    <tr>
+      <td>Ops não aprovar Datadog Agent no host do Control-M Agent</td>
+      <td>Média</td>
+      <td>Padrão A puro. Demo perde Logs indexados, mas mantém APM/Métricas/OL/DBM.</td>
+    </tr>
+    <tr>
+      <td>Control-M abaixo da versão 9.0.20</td>
+      <td>Baixa (confirmar com Lairton)</td>
+      <td>Job:Command sempre funciona. Só perde Automation API REST — JSONs viram XML legado.</td>
+    </tr>
+    <tr>
+      <td>OpenLineage Python 1.37+ DatadogTransport bug em produção</td>
+      <td>Baixa</td>
+      <td>Fallback HTTP transport (mesmo código) — emite direto pro <code>/openlineage/api/v1/lineage</code> do Agent.</td>
+    </tr>
+    <tr>
+      <td>Grants DBM em Oracle XE com bug OP_FLAGS (que vimos)</td>
+      <td>N/A em produção</td>
+      <td>Oracle Enterprise (B3) não tem o bug do XE 21c. <code>query_samples.enabled: true</code> funciona normalmente.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="footer-note">
+  <strong>Resumo executivo:</strong> esta arquitetura usa apenas componentes <em>já validados em produção</em> em Control-M + Datadog (não depende de plug-ins custom da BMC, não depende de Application Integrator).
+  As únicas novidades para o time Ops da B3 são (1) editar o campo <code>Command</code> do job para incluir <code>ddtrace-run</code> e (2) opcionalmente instalar o Datadog Agent no host do Control-M Agent.
+  O caminho mais arriscado é o lineage stand-alone (Preview / CSM enable) — todos os outros sinais (APM, DBM, métricas, logs, dashboard customizado) são GA.
+</div>
+
+</body>
+</html>

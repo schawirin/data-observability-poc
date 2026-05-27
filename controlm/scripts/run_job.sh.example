@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# run_job.sh — wrapper Bash mínimo para emitir OpenLineage ao Datadog Agent.
+# Reproduz o que o run_job.py faz, mas em shell puro com `curl` e `cat <<EOF`.
+#
+# Uso (chamado pelo Control-M):
+#   ./run_job.sh <job_name> <START|COMPLETE|FAIL> <business_date>
+#
+# Variáveis Control-M / env:
+#   OL_NAMESPACE     namespace OL (default: b3-poc-demo-v3)
+#   OL_PARENT_RUN_ID id do pipeline como custom facet/tag
+#   DD_AGENT_HOST    host do Datadog Agent (default: datadog-agent)
+#   DD_TRACE_PORT    porta do OL proxy (default: 8126)
+#
+# Dependências do agent host:
+#   bash, curl, uuidgen, date
+
+set -euo pipefail
+
+JOB_NAME="${1:?usage: $0 <job_name> <START|COMPLETE|FAIL> <business_date>}"
+EVENT_TYPE="${2:?}"
+BUSINESS_DATE="${3:?}"
+
+RUN_ID="${RUN_ID:-$(uuidgen | tr 'A-Z' 'a-z')}"
+PARENT_RUN_ID="${OL_PARENT_RUN_ID:-}"
+EVENT_SHIFT_HOURS="${OL_EVENT_TIME_SHIFT_HOURS:-0}"
+EVENT_TIME=$(python3 - "$EVENT_SHIFT_HOURS" <<'PY'
+from datetime import datetime, timedelta, timezone
+import sys
+shift = float(sys.argv[1])
+print((datetime.now(timezone.utc) + timedelta(hours=shift)).isoformat(timespec="milliseconds").replace("+00:00", "Z"))
+PY
+)
+
+DD_AGENT_HOST="${DD_AGENT_HOST:-datadog-agent}"
+DD_TRACE_PORT="${DD_TRACE_PORT:-8126}"
+NAMESPACE="${OL_NAMESPACE:-b3-poc-demo-v3}"
+PRODUCER="https://github.com/b3-poc/wrapper-sh"
+SCHEMA_URL='https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunEvent'
+
+# ── Mapeamento estático job → datasets de I/O ────────────────────────────────
+case "$JOB_NAME" in
+  close_market_eod)
+    INPUT_NS='oracle://demo-oracle:1521';        INPUT_NAME='XEPDB1.DEMOPOC.ASTADRVT_TRADE_MVMT'
+    OUTPUT_NS='sqlserver://demo-sqlserver:1433'; OUTPUT_NAME='demopoc.dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO'
+    ROW_COUNT=500 ;;
+  reconcile_d1_positions)
+    INPUT_NS='oracle://demo-oracle:1521';        INPUT_NAME='XEPDB1.DEMOPOC.ASTANO_FGBE_DRVT_PSTN'
+    OUTPUT_NS='sqlserver://demo-sqlserver:1433'; OUTPUT_NAME='demopoc.dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL'
+    ROW_COUNT=50 ;;
+  quality_gate_d1)
+    INPUT_NS='sqlserver://demo-sqlserver:1433'; INPUT_NAME='demopoc.dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO'
+    OUTPUT_NS='sqlserver://demo-sqlserver:1433'; OUTPUT_NAME='demopoc.dbo.ADWPM_DQ_RESULTS'
+    ROW_COUNT=5 ;;
+  publish_d1_reports)
+    INPUT_NS='sqlserver://demo-sqlserver:1433'; INPUT_NAME='demopoc.dbo.ADWPM_DQ_RESULTS'
+    OUTPUT_NS='s3://mock-exchange';             OUTPUT_NAME='derivatives/ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO.parquet'
+    ROW_COUNT=500 ;;
+  *) echo "Unknown job: $JOB_NAME" >&2; exit 2 ;;
+esac
+
+# ── Constrói o evento OL via heredoc ─────────────────────────────────────────
+CONTROL_M_BLOCK=""
+if [ -n "$PARENT_RUN_ID" ]; then
+  CONTROL_M_BLOCK=$(cat <<EOF
+,
+      "controlm": {
+        "_producer": "$PRODUCER",
+        "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/CustomFacet.json",
+        "orchestrator": "control-m",
+        "pipeline": "b3_d1_pipeline",
+        "pipelineRunId": "$PARENT_RUN_ID",
+        "wrapper": "run_job.sh"
+      }
+EOF
+)
+fi
+
+PAYLOAD=$(cat <<EOF
+{
+  "eventType": "$EVENT_TYPE",
+  "eventTime": "$EVENT_TIME",
+  "run": {
+    "runId": "$RUN_ID",
+    "facets": {
+      "business_date": {
+        "_producer": "$PRODUCER",
+        "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/CustomFacet.json",
+        "business_date": "$BUSINESS_DATE"
+      }$CONTROL_M_BLOCK
+    }
+  },
+  "job": {
+    "namespace": "$NAMESPACE",
+    "name": "$JOB_NAME",
+    "facets": {
+      "jobType": {
+        "_producer": "$PRODUCER",
+        "_schemaURL": "https://openlineage.io/spec/facets/2-0-3/JobTypeJobFacet.json",
+        "processingType": "BATCH",
+        "integration": "custom",
+        "jobType": "JOB"
+      }
+    }
+  },
+  "inputs":  [{"namespace": "$INPUT_NS",  "name": "$INPUT_NAME",  "facets": {}}],
+  "outputs": [{
+    "namespace": "$OUTPUT_NS",
+    "name": "$OUTPUT_NAME",
+    "facets": {},
+    "outputFacets": {
+      "outputStatistics": {
+        "_producer": "$PRODUCER",
+        "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/OutputStatisticsOutputDatasetFacet.json",
+        "rowCount": $ROW_COUNT,
+        "size": $((ROW_COUNT * 256))
+      }
+    }
+  }],
+  "producer": "$PRODUCER",
+  "schemaURL": "$SCHEMA_URL"
+}
+EOF
+)
+
+# ── POST ao Datadog Agent OL proxy ───────────────────────────────────────────
+curl -sk -o /dev/null -w "[OL] %{http_code} job=$JOB_NAME event=$EVENT_TYPE run=$RUN_ID\n" \
+  -X POST "http://${DD_AGENT_HOST}:${DD_TRACE_PORT}/openlineage/api/v1/lineage" \
+  -H "Content-Type: application/json" \
+  --data "$PAYLOAD"

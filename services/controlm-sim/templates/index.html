@@ -3,394 +3,565 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Exchange — Control-M Job Monitor</title>
+<title>CTM-EM Demo — b3_d1_pipeline</title>
+<!-- Cytoscape.js + dagre layout (network view) -->
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
 <style>
   :root {
-    --bg: #0f1117;
-    --surface: #161b22;
-    --surface2: #1e2430;
-    --border: #30363d;
-    --text: #c9d1d9;
-    --text-muted: #8b949e;
-    --green: #3fb950;
-    --green-dim: #238636;
-    --blue: #58a6ff;
-    --blue-dim: #1f6feb;
-    --red: #f85149;
-    --red-dim: #da3633;
-    --yellow: #d29922;
-    --purple: #bc8cff;
-    --cyan: #39d2c0;
-    --gray: #484f58;
+    /* ── Control-M-style corporate palette ─────────────────────────── */
+    --bg:           #1A2332;
+    --surface:      #243447;
+    --surface2:     #2D3F54;
+    --surface3:     #1F2D3F;
+    --border:       #3A4D63;
+    --border-soft:  #324559;
+    --border-strong:#4A5F77;
+
+    --text:         #E8EEF5;
+    --text-muted:   #8B9CB0;
+    --text-dim:     #6B7C90;
+
+    --accent:       #0091D5;  /* CTM blue */
+    --accent-dim:   #006EA8;
+    --accent-bright:#1FA8E0;
+
+    --header-bg:    #0D2238;
+    --header-band:  linear-gradient(180deg, #0F2A47 0%, #0A1E33 100%);
+
+    /* ── Status semáforo (saturado, estilo Control-M EM) ──────────── */
+    --st-wait:      #6B7C90;
+    --st-wait-bg:   rgba(107,124,144,0.12);
+    --st-exec:      #0091D5;
+    --st-exec-bg:   rgba(0,145,213,0.15);
+    --st-ok:        #2E9E3F;
+    --st-ok-bg:     rgba(46,158,63,0.13);
+    --st-fail:      #D63841;
+    --st-fail-bg:   rgba(214,56,65,0.13);
+    --st-held:      #E8A33F;
+    --st-held-bg:   rgba(232,163,63,0.13);
+
+    --row-hover:    rgba(0,145,213,0.06);
+    --row-sel:      rgba(0,145,213,0.12);
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
     background: var(--bg);
     color: var(--text);
-    min-height: 100vh;
+    font-size: 13px;
+    overflow: hidden;
   }
 
-  /* ── HEADER ─────────────────────────────── */
-  .header {
+  /* ── TOP HEADER (CTM EM-style band) ───────────────────────────── */
+  .ctm-header {
+    height: 48px;
+    background: var(--header-band);
+    border-bottom: 1px solid var(--border-strong);
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 12px 24px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    position: sticky;
-    top: 0;
-    z-index: 100;
+    padding: 0 16px;
+    flex-shrink: 0;
   }
-  .logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 18px;
-    font-weight: 700;
-  }
-  .logo-icon {
-    background: linear-gradient(135deg, var(--blue-dim), var(--blue));
-    color: #fff;
+  .ctm-brand { display: flex; align-items: center; gap: 10px; margin-right: 28px; }
+  .ctm-logo {
     width: 32px; height: 32px;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    border-radius: 4px;
+    background: var(--accent);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
     font-weight: 900;
-    font-size: 14px;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 2px 6px rgba(0,0,0,0.3);
   }
-  .logo-sub { color: var(--text-muted); font-weight: 400; font-size: 14px; margin-left: 4px; }
+  .ctm-wordmark { display: flex; flex-direction: column; line-height: 1; }
+  .ctm-wordmark-top { font-size: 14px; font-weight: 700; color: #fff; letter-spacing: 0.3px; }
+  .ctm-wordmark-sub { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-top: 3px; }
 
-  .header-right { display: flex; align-items: center; gap: 16px; }
-  .dd-links { display: flex; gap: 12px; }
-  .dd-link {
-    font-size: 12px;
+  .ctm-mainmenu { display: flex; gap: 2px; flex: 1; }
+  .ctm-mainmenu a {
+    padding: 6px 14px;
+    font-size: 13px;
     color: var(--text-muted);
     text-decoration: none;
-    padding: 5px 10px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    transition: all 0.15s;
+    border-radius: 4px;
+    cursor: default;
+  }
+  .ctm-mainmenu a.active {
+    color: #fff;
+    background: rgba(0,145,213,0.18);
+    border-bottom: 2px solid var(--accent);
+    border-radius: 4px 4px 0 0;
+    padding-bottom: 4px;
+  }
+  .ctm-mainmenu a:not(.active):hover { background: rgba(255,255,255,0.04); color: var(--text); }
+
+  .ctm-header-right { display: flex; align-items: center; gap: 10px; }
+  .env-pill {
+    padding: 4px 10px;
+    background: rgba(0,145,213,0.16);
+    border: 1px solid var(--accent-dim);
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--accent-bright);
+  }
+  .user-pill {
+    padding: 4px 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .dd-links { display: flex; gap: 6px; }
+  .dd-link {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 4px 9px;
+    border-radius: 4px;
+    border: 1px solid var(--border-soft);
+    transition: all 0.12s;
     white-space: nowrap;
   }
-  .dd-link:hover { color: var(--blue); border-color: var(--blue-dim); }
-  .pipeline-badge {
-    padding: 5px 14px;
-    border-radius: 16px;
+  .dd-link:hover { color: var(--accent-bright); border-color: var(--accent-dim); background: rgba(0,145,213,0.06); }
+
+  /* ── SUB-HEADER (viewpoint bar) ──────────────────────────────── */
+  .ctm-subheader {
+    height: 36px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 18px;
+    flex-shrink: 0;
     font-size: 12px;
+  }
+  .sub-field { display: flex; align-items: center; gap: 6px; }
+  .sub-label { color: var(--text-dim); text-transform: uppercase; font-size: 10px; letter-spacing: 0.6px; font-weight: 600; }
+  .sub-value { color: var(--text); font-weight: 600; }
+  .sub-value.accent { color: var(--accent-bright); }
+  .sub-separator { width: 1px; height: 18px; background: var(--border); }
+
+  .pipeline-badge {
+    padding: 4px 14px;
+    border-radius: 12px;
+    font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.6px;
+    border: 1px solid;
+    margin-left: auto;
   }
-  .badge-idle  { background: var(--border); color: var(--text-muted); }
-  .badge-run   { background: #0d2044; color: var(--blue); border: 1px solid var(--blue-dim); animation: blink 1.2s infinite; }
-  .badge-ok    { background: #0d2d1a; color: var(--green); border: 1px solid var(--green-dim); }
-  .badge-fail  { background: #2d0d0d; color: var(--red); border: 1px solid var(--red-dim); }
-  @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:.5; } }
+  .badge-idle  { background: var(--st-wait-bg); color: var(--st-wait); border-color: var(--border); }
+  .badge-run   { background: var(--st-exec-bg); color: var(--accent-bright); border-color: var(--accent-dim); animation: blink 1.2s infinite; }
+  .badge-ok    { background: var(--st-ok-bg); color: var(--st-ok); border-color: var(--st-ok); }
+  .badge-fail  { background: var(--st-fail-bg); color: var(--st-fail); border-color: var(--st-fail); }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.6} }
 
-  /* ── MAIN LAYOUT ─────────────────────────── */
+  /* ── ACTION TOOLBAR (Control-M EM ribbon) ────────────────────── */
+  .ctm-toolbar {
+    height: 44px;
+    background: var(--surface3);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .tb-group { display: flex; gap: 2px; align-items: center; padding: 0 6px; }
+  .tb-sep { width: 1px; height: 28px; background: var(--border); margin: 0 4px; }
+  .tb-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.12s;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+  .tb-btn svg { flex-shrink: 0; }
+  .tb-btn:hover:not(:disabled) { background: rgba(0,145,213,0.10); color: var(--text); border-color: var(--border-soft); }
+  .tb-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .tb-btn-primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent-dim);
+  }
+  .tb-btn-primary:hover:not(:disabled) { background: var(--accent-bright); border-color: var(--accent); color:#fff; }
+  .tb-btn-warn { color: var(--st-held); }
+  .tb-btn-danger { color: var(--st-fail); }
+  .tb-btn-ok { color: var(--st-ok); }
+
+  /* ── LAYOUT ──────────────────────────────────────────────────── */
   .layout {
     display: flex;
-    height: calc(100vh - 57px);
+    height: calc(100vh - 48px - 36px - 44px - 26px);
+    overflow: hidden;
   }
 
-  /* ── SIDEBAR ─────────────────────────────── */
+  /* ── SIDEBAR (left filters/params) ───────────────────────────── */
   .sidebar {
-    width: 300px;
-    min-width: 300px;
-    border-right: 1px solid var(--border);
+    width: 320px;
+    min-width: 320px;
     background: var(--surface);
+    border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
   }
-  .sidebar-section {
-    padding: 16px;
-    border-bottom: 1px solid var(--border);
+  .sidebar::-webkit-scrollbar { width: 6px; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .sb-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .sb-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    display: flex; align-items: center; justify-content: space-between;
   }
-  .sidebar-title {
+  .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .form-group label {
     font-size: 11px;
+    color: var(--text-muted);
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--text-muted);
-    margin-bottom: 12px;
-  }
-  .form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    margin-bottom: 12px;
-  }
-  .form-group label {
-    font-size: 12px;
-    color: var(--text-muted);
-    font-weight: 500;
+    letter-spacing: 0.4px;
   }
   input[type="date"], select, input[type="text"], textarea {
     background: var(--bg);
     border: 1px solid var(--border);
     color: var(--text);
-    padding: 8px 10px;
-    border-radius: 6px;
-    font-size: 13px;
+    padding: 7px 9px;
+    border-radius: 3px;
+    font-size: 12px;
     font-family: inherit;
     width: 100%;
   }
   input[type="date"]:focus, select:focus, input[type="text"]:focus, textarea:focus {
     outline: none;
-    border-color: var(--blue);
-    box-shadow: 0 0 0 2px rgba(88,166,255,0.15);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(0,145,213,0.18);
   }
-  textarea { resize: vertical; min-height: 60px; font-size: 12px; font-family: 'SF Mono', monospace; }
+  textarea { resize: vertical; min-height: 60px; font-family: "SF Mono", monospace; }
 
   .btn {
-    padding: 8px 16px;
-    border-radius: 6px;
+    padding: 7px 12px;
+    border-radius: 3px;
     border: 1px solid var(--border);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    transition: all 0.15s;
+    transition: all 0.12s;
     font-family: inherit;
     white-space: nowrap;
+    background: var(--surface2);
+    color: var(--text);
   }
-  .btn:hover { filter: brightness(1.15); }
-  .btn:disabled { opacity: 0.35; cursor: not-allowed; filter: none; }
-  .btn-primary  { background: var(--green-dim); color: #fff; border-color: var(--green-dim); }
-  .btn-blue     { background: var(--blue-dim); color: #fff; border-color: var(--blue-dim); }
-  .btn-danger   { background: transparent; color: var(--red); border-color: var(--red-dim); }
-  .btn-ghost    { background: transparent; color: var(--text-muted); border-color: var(--border); }
-  .btn-warn     { background: transparent; color: var(--yellow); border-color: #9e6a03; }
-  .btn-sm       { padding: 5px 10px; font-size: 12px; }
+  .btn:hover:not(:disabled) { background: var(--surface3); border-color: var(--accent-dim); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary  { background: var(--accent); color: #fff; border-color: var(--accent-dim); }
+  .btn-primary:hover:not(:disabled) { background: var(--accent-bright); border-color: var(--accent); }
+  .btn-ghost    { background: transparent; }
+  .btn-sm       { padding: 5px 9px; font-size: 11px; }
   .btn-full     { width: 100%; justify-content: center; }
 
-  .job-edit-panel { padding: 0; }
-  .job-edit-header {
-    padding: 12px 16px 8px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .job-edit-name {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--blue);
-  }
-  .job-edit-desc {
-    font-size: 12px;
-    color: var(--text-muted);
-    padding: 8px 16px 12px;
-    line-height: 1.5;
-    border-bottom: 1px solid var(--border);
-  }
-  .job-edit-fields { padding: 12px 16px; }
-
-  /* ── JOB STEPS (step queue list) ─────────── */
+  /* ── STEPS LIST (sidebar) ────────────────────────────────────── */
   .step-list { list-style: none; }
   .step-item {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 7px 0;
-    border-bottom: 1px solid var(--border);
+    padding: 8px 10px;
+    margin-bottom: 2px;
+    border-radius: 3px;
     cursor: pointer;
     transition: background 0.1s;
-    border-radius: 4px;
-    padding: 7px 8px;
+    border-left: 3px solid transparent;
   }
-  .step-item:hover { background: rgba(88,166,255,0.06); }
-  .step-item.selected { background: rgba(88,166,255,0.1); }
-  .step-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
+  .step-item:hover { background: var(--row-hover); }
+  .step-item.selected { background: var(--row-sel); border-left-color: var(--accent); }
+  .step-status-icon {
+    width: 18px; height: 18px;
     flex-shrink: 0;
-  }
-  .step-dot-wait   { background: var(--gray); }
-  .step-dot-run    { background: var(--blue); animation: blink 1s infinite; }
-  .step-dot-ok     { background: var(--green); }
-  .step-dot-fail   { background: var(--red); }
-  .step-name { font-size: 12px; font-weight: 600; flex: 1; }
-  .step-sla  { font-size: 11px; color: var(--text-muted); }
-
-  .add-step-form { display: none; }
-  .add-step-form.visible { display: block; }
-
-  /* ── CONTENT ─────────────────────────────── */
-  .content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  /* ── TOOLBAR ─────────────────────────────── */
-  .toolbar {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    flex-wrap: wrap;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: 700;
   }
-  .toolbar-sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
-  .toolbar-label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+  .ssi-wait { background: var(--st-wait-bg); color: var(--st-wait); border: 1px solid var(--st-wait); }
+  .ssi-exec { background: var(--st-exec-bg); color: var(--accent-bright); border: 1px solid var(--accent); animation: blink 1s infinite; }
+  .ssi-ok   { background: var(--st-ok-bg); color: var(--st-ok); border: 1px solid var(--st-ok); }
+  .ssi-fail { background: var(--st-fail-bg); color: var(--st-fail); border: 1px solid var(--st-fail); }
+  .ssi-held { background: var(--st-held-bg); color: var(--st-held); border: 1px solid var(--st-held); }
+  .step-name { font-size: 12px; font-weight: 600; flex: 1; }
+  .step-sla  { font-size: 10px; color: var(--text-dim); }
 
-  /* ── JOB ORDER MONITOR ───────────────────── */
+  /* ── CONTENT ─────────────────────────────────────────────────── */
+  .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+
+  /* ── VIEW TABS ───────────────────────────────────────────────── */
+  .view-tabs {
+    display: flex;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 12px;
+    flex-shrink: 0;
+    align-items: center;
+    height: 38px;
+  }
+  .view-tab {
+    padding: 10px 16px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: inherit;
+    margin-bottom: -1px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .view-tab:hover { color: var(--text); }
+  .view-tab.active { color: var(--accent-bright); border-bottom-color: var(--accent); }
+  .view-tab-count {
+    background: var(--surface3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1px 7px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+  }
+  .view-tab.active .view-tab-count { background: var(--accent); color: #fff; border-color: var(--accent-dim); }
+  .view-tabs-right { margin-left: auto; display: flex; align-items: center; gap: 8px; padding-right: 4px; }
+  .view-mini-info { font-size: 11px; color: var(--text-dim); }
+
+  /* ── VIEW PANES ──────────────────────────────────────────────── */
+  .view-pane { flex: 1; overflow: hidden; display: none; flex-direction: column; }
+  .view-pane.active { display: flex; }
+
+  /* ── TABULAR VIEW: monitor table ─────────────────────────────── */
   .monitor-wrapper {
     flex: 0 0 auto;
-    overflow-x: auto;
+    max-height: 45%;
+    overflow: auto;
+    background: var(--surface);
     border-bottom: 1px solid var(--border);
   }
-  .monitor-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-    min-width: 700px;
-  }
-  .monitor-table thead tr {
-    background: var(--surface2);
-    border-bottom: 2px solid var(--border);
-  }
+  .monitor-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 900px; }
+  .monitor-table thead { position: sticky; top: 0; z-index: 5; }
+  .monitor-table thead tr { background: var(--surface3); border-bottom: 1px solid var(--border-strong); }
   .monitor-table th {
-    padding: 9px 14px;
+    padding: 8px 12px;
     text-align: left;
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
-    color: var(--text-muted);
+    letter-spacing: 0.7px;
+    color: var(--text-dim);
     white-space: nowrap;
+    border-right: 1px solid var(--border-soft);
   }
-  .monitor-table tbody tr {
-    border-bottom: 1px solid var(--border);
-    cursor: pointer;
-    transition: background 0.1s;
-  }
-  .monitor-table tbody tr:hover { background: rgba(88,166,255,0.04); }
-  .monitor-table tbody tr.selected-row { background: rgba(88,166,255,0.08); }
-  .monitor-table td {
-    padding: 10px 14px;
-    white-space: nowrap;
-  }
-  .job-order-num {
-    font-size: 12px;
-    color: var(--text-muted);
-    font-family: 'SF Mono', monospace;
-  }
-  .job-name-cell { font-weight: 600; font-size: 13px; }
-  .job-dep  { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .monitor-table th:last-child { border-right: none; }
+  .monitor-table tbody tr { border-bottom: 1px solid var(--border-soft); cursor: pointer; transition: background 0.1s; }
+  .monitor-table tbody tr:hover { background: var(--row-hover); }
+  .monitor-table tbody tr.selected-row { background: var(--row-sel); box-shadow: inset 3px 0 0 var(--accent); }
+  .monitor-table td { padding: 9px 12px; white-space: nowrap; border-right: 1px solid var(--border-soft); }
+  .monitor-table td:last-child { border-right: none; }
+  .order-id { font-family: "SF Mono", "Fira Code", monospace; font-size: 11px; color: var(--accent-bright); font-weight: 700; }
+  .job-name-cell { font-weight: 600; font-size: 12px; }
+  .job-dep  { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
 
-  /* Status chips */
+  /* Status chips Control-M-style */
   .chip {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.4px;
+    border: 1px solid;
   }
-  .chip-dot { width: 6px; height: 6px; border-radius: 50%; }
-  .chip-wait  { background: rgba(72,79,88,.25); color: var(--gray); }
-  .chip-run   { background: rgba(88,166,255,.12); color: var(--blue); border: 1px solid rgba(88,166,255,.3); }
-  .chip-ok    { background: rgba(63,185,80,.12); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
-  .chip-fail  { background: rgba(248,81,73,.12); color: var(--red); border: 1px solid rgba(248,81,73,.3); }
-  .chip-sla   { background: rgba(210,153,34,.12); color: var(--yellow); border: 1px solid rgba(210,153,34,.3); }
+  .chip-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .chip-wait  { background: var(--st-wait-bg); color: var(--st-wait); border-color: var(--st-wait); }
+  .chip-exec  { background: var(--st-exec-bg); color: var(--accent-bright); border-color: var(--accent); }
+  .chip-exec .chip-dot { animation: blink 1s infinite; }
+  .chip-ok    { background: var(--st-ok-bg); color: var(--st-ok); border-color: var(--st-ok); }
+  .chip-fail  { background: var(--st-fail-bg); color: var(--st-fail); border-color: var(--st-fail); }
+  .chip-held  { background: var(--st-held-bg); color: var(--st-held); border-color: var(--st-held); }
+  .chip-sla   { background: var(--st-held-bg); color: var(--st-held); border-color: var(--st-held); }
 
   .fault-tag {
-    font-size: 10px;
-    padding: 2px 6px;
-    border-radius: 4px;
-    background: rgba(210,153,34,.15);
-    color: var(--yellow);
-    border: 1px solid rgba(210,153,34,.3);
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--st-held-bg);
+    color: var(--st-held);
+    border: 1px solid var(--st-held);
     margin-left: 6px;
-    font-weight: 600;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
   }
-  .mono { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; }
+  .mono { font-family: "SF Mono", "Fira Code", Menlo, monospace; }
 
-  /* ── CONSOLE ─────────────────────────────── */
-  .console-section {
-    flex: 1;
+  /* ── NETWORK VIEW (Cytoscape) ────────────────────────────────── */
+  .network-pane {
+    position: relative;
+    background: var(--surface3);
+    background-image:
+      linear-gradient(rgba(58,77,99,0.18) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(58,77,99,0.18) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  #networkCanvas { width: 100%; height: 100%; }
+  .network-legend {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(13,34,56,0.92);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-size: 11px;
+    z-index: 10;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    gap: 6px;
   }
-  .console-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface2);
-  }
-  .console-header-left { display: flex; align-items: center; gap: 6px; }
-  .console-dot { width: 10px; height: 10px; border-radius: 50%; }
-  .dot-r { background: #f85149; }
-  .dot-y { background: #d29922; }
-  .dot-g { background: #3fb950; }
-  .console-title { font-size: 12px; color: var(--text-muted); font-weight: 600; margin-left: 6px; }
-  .console-body {
-    flex: 1;
-    padding: 12px 16px;
-    overflow-y: auto;
-    font-family: 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
-    font-size: 12px;
-    line-height: 1.7;
-    scroll-behavior: smooth;
-  }
-  .console-body::-webkit-scrollbar { width: 4px; }
-  .console-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-  .log-line { white-space: pre-wrap; word-break: break-all; }
-  .log-ts      { color: #484f58; }
-  .log-info    { color: var(--text); }
-  .log-success { color: var(--green); }
-  .log-warn    { color: var(--yellow); }
-  .log-error   { color: var(--red); }
-  .log-job-start  { color: var(--blue); font-weight: 600; }
-  .log-pipe-ok    { color: var(--green); font-weight: 700; }
-  .log-pipe-fail  { color: var(--red); font-weight: 700; }
+  .legend-item { display: flex; align-items: center; gap: 8px; }
+  .legend-swatch { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid; }
+  .network-actions { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; z-index: 10; }
 
-  /* ── DQ RESULTS INLINE ───────────────────── */
-  .dq-panel {
-    padding: 12px 16px;
-    border-top: 1px solid var(--border);
-    background: var(--surface2);
-    display: none;
-  }
+  /* ── DQ PANEL ─────────────────────────────────────────────────── */
+  .dq-panel { padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface); display: none; }
   .dq-panel.visible { display: block; }
-  .dq-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .dq-title { font-size: 10px; font-weight: 700; margin-bottom: 8px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.8px; }
   .dq-grid { display: flex; gap: 8px; flex-wrap: wrap; }
   .dq-card {
-    background: var(--surface);
+    background: var(--surface3);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 4px;
     padding: 8px 12px;
     font-size: 12px;
     min-width: 140px;
   }
-  .dq-card-label { color: var(--text-muted); font-size: 11px; margin-bottom: 4px; }
-  .dq-card-val { font-weight: 700; font-size: 16px; }
-  .dq-val-pass { color: var(--green); }
-  .dq-val-fail { color: var(--red); }
+  .dq-card-label { color: var(--text-dim); font-size: 10px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .dq-card-val { font-weight: 700; font-size: 18px; }
+  .dq-val-pass { color: var(--st-ok); }
+  .dq-val-fail { color: var(--st-fail); }
 
-  /* ── ADD STEP MODAL ──────────────────────── */
+  /* ── FILES PANEL ──────────────────────────────────────────────── */
+  .files-panel { padding: 8px 16px; border-top: 1px solid var(--border); background: var(--surface); display: none; font-size: 11px; }
+  .files-panel.visible { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .files-label { color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; font-size: 10px; }
+  .file-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: rgba(0,145,213,0.08);
+    border: 1px solid var(--border-soft);
+    border-radius: 3px;
+    color: var(--accent-bright);
+    font-family: "SF Mono", monospace;
+    font-size: 11px;
+  }
+
+  /* ── CONSOLE (SYSOUT) ─────────────────────────────────────────── */
+  .console-section { flex: 1; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid var(--border); }
+  .console-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 14px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .console-header-left { display: flex; align-items: center; gap: 6px; }
+  .console-title { font-size: 10px; color: var(--text-dim); font-weight: 700; margin-left: 6px; text-transform: uppercase; letter-spacing: 0.8px; }
+  .console-filter {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: inherit;
+    width: 200px;
+  }
+  .console-body {
+    flex: 1;
+    padding: 10px 14px;
+    overflow-y: auto;
+    font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.65;
+    background: #0E1A28;
+    scroll-behavior: smooth;
+  }
+  .console-body::-webkit-scrollbar { width: 6px; }
+  .console-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .log-line { white-space: pre-wrap; word-break: break-all; }
+  .log-line.hidden { display: none; }
+  .log-ts      { color: #4A5F77; margin-right: 6px; }
+  .log-info    { color: var(--text); }
+  .log-success { color: var(--st-ok); }
+  .log-warn    { color: var(--st-held); }
+  .log-error   { color: var(--st-fail); }
+  .log-job-start  { color: var(--accent-bright); font-weight: 600; }
+  .log-pipe-ok    { color: var(--st-ok); font-weight: 700; }
+  .log-pipe-fail  { color: var(--st-fail); font-weight: 700; }
+
+  /* ── BOTTOM STATUS BAR (Control-M-style) ──────────────────────── */
+  .ctm-statusbar {
+    height: 26px;
+    background: var(--header-bg);
+    border-top: 1px solid var(--border-strong);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    gap: 16px;
+    font-size: 11px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .sb-stat { display: flex; align-items: center; gap: 5px; }
+  .sb-stat-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .sb-stat strong { color: var(--text); font-weight: 700; margin-left: 2px; }
+  .sb-version { margin-left: auto; color: var(--text-dim); font-size: 10px; }
+
+  /* ── ADD STEP MODAL ───────────────────────────────────────────── */
   .modal-overlay {
     display: none;
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.6);
+    background: rgba(0,0,0,0.65);
     z-index: 200;
     align-items: center;
     justify-content: center;
@@ -398,73 +569,299 @@
   .modal-overlay.visible { display: flex; }
   .modal {
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 24px;
-    width: 420px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 22px;
+    width: 440px;
     max-width: 95vw;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.5);
   }
-  .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
-  .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+  .modal-title { font-size: 14px; font-weight: 700; margin-bottom: 14px; color: var(--text); }
+  .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
 
-  /* ── FILES EXPORTED ──────────────────────── */
-  .files-panel {
-    padding: 8px 16px;
-    border-top: 1px solid var(--border);
+  /* ── JOB DETAIL PANEL (sidebar) ──────────────────────────────── */
+  .job-detail-panel { background: var(--surface3); border-top: 2px solid var(--accent); }
+  .job-detail-header { padding: 10px 14px 8px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); }
+  .job-detail-name { font-size: 13px; font-weight: 700; color: var(--accent-bright); font-family: "SF Mono", monospace; }
+  .job-detail-close { margin-left: auto; background: transparent; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; padding: 2px 6px; }
+  .job-detail-close:hover { color: var(--text); }
+  .job-detail-body { padding: 10px 14px; font-size: 11px; line-height: 1.55; }
+  .job-detail-desc { color: var(--text-muted); font-size: 11px; padding: 8px 0 4px; line-height: 1.55; }
+
+  .add-step-form { display: none; }
+  .add-step-form.visible { display: block; }
+
+  /* ── JOB PROPERTIES MODAL (CTM-style with tabs) ──────────────── */
+  .jp-modal {
     background: var(--surface);
-    display: none;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    width: 620px;
+    max-width: 95vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+    overflow: hidden;
+  }
+  .jp-modal-header {
+    padding: 14px 18px;
+    background: var(--header-band);
+    border-bottom: 1px solid var(--border-strong);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .jp-modal-icon {
+    width: 28px; height: 28px;
+    background: var(--accent);
+    border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 900; font-size: 11px;
+  }
+  .jp-modal-title { font-size: 14px; font-weight: 700; color: #fff; }
+  .jp-modal-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; font-family: "SF Mono", monospace; }
+  .jp-modal-close {
+    margin-left: auto;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 4px 10px;
+  }
+  .jp-modal-close:hover { color: #fff; }
+
+  .jp-tabs {
+    display: flex;
+    background: var(--surface3);
+    border-bottom: 1px solid var(--border);
+    padding: 0 8px;
+  }
+  .jp-tab {
+    padding: 9px 14px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: inherit;
+    margin-bottom: -1px;
+  }
+  .jp-tab:hover { color: var(--text); }
+  .jp-tab.active { color: var(--accent-bright); border-bottom-color: var(--accent); }
+
+  .jp-body {
+    padding: 16px 20px;
+    flex: 1;
+    overflow-y: auto;
+    background: var(--surface);
+  }
+  .jp-pane { display: none; }
+  .jp-pane.active { display: block; }
+
+  .jp-row { display: flex; gap: 12px; margin-bottom: 10px; }
+  .jp-row > .form-group { flex: 1; margin-bottom: 0; }
+
+  .jp-deps-list {
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg);
+    padding: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .jp-dep-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 6px;
+    border-radius: 3px;
     font-size: 12px;
   }
-  .files-panel.visible { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
-  .files-label { color: var(--text-muted); font-weight: 600; }
-  .file-badge {
-    display: inline-flex;
+  .jp-dep-row:hover { background: var(--row-hover); }
+  .jp-dep-row input[type="checkbox"] { width: auto; margin: 0; }
+  .jp-dep-row .dep-name { font-family: "SF Mono", monospace; color: var(--text); }
+  .jp-dep-row .dep-folder { color: var(--text-dim); font-size: 10px; margin-left: auto; }
+
+  .jp-modal-footer {
+    padding: 12px 18px;
+    background: var(--surface3);
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
     align-items: center;
-    gap: 5px;
-    padding: 3px 8px;
-    background: rgba(88,166,255,.08);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    color: var(--blue);
-    font-family: 'SF Mono', monospace;
-    font-size: 11px;
   }
+  .jp-modal-footer .jp-err {
+    margin-right: auto;
+    color: var(--st-fail);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .type-help {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    line-height: 1.5;
+    padding: 6px 9px;
+    background: var(--surface3);
+    border-left: 2px solid var(--accent);
+    border-radius: 0 3px 3px 0;
+  }
+  .type-help code {
+    background: var(--bg);
+    padding: 1px 5px;
+    border-radius: 2px;
+    font-size: 10px;
+    color: var(--accent-bright);
+  }
+
+  .step-action-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 2px 5px;
+    font-size: 12px;
+    border-radius: 2px;
+    visibility: hidden;
+  }
+  .step-item:hover .step-action-btn { visibility: visible; }
+  .step-action-btn:hover { color: var(--accent-bright); background: rgba(0,145,213,0.1); }
+  .step-action-btn.delete:hover { color: var(--st-fail); background: rgba(214,56,65,0.1); }
 </style>
 </head>
 <body>
 
-<!-- ── HEADER ── -->
-<div class="header">
-  <div class="logo">
-    <div class="logo-icon">CTM</div>
-    Exchange <span class="logo-sub">Job Order Monitor &mdash; market_d1_pipeline</span>
-  </div>
-  <div class="header-right">
-    <div class="dd-links">
-      <a class="dd-link" href="https://app.{{ dd_site }}/data-jobs" target="_blank">&#128202; Jobs</a>
-      <a class="dd-link" href="https://app.{{ dd_site }}/data-jobs/lineage" target="_blank">&#128279; Lineage</a>
-      <a class="dd-link" href="https://app.{{ dd_site }}/databases" target="_blank">&#128200; DBM</a>
-      <a class="dd-link" href="https://app.{{ dd_site }}/logs?query=service%3Ademo-etl-pipeline" target="_blank">&#128196; Logs</a>
+<!-- ═══════════════ TOP HEADER (CTM-EM band) ═══════════════ -->
+<header class="ctm-header">
+  <div class="ctm-brand">
+    <div class="ctm-logo">CTM</div>
+    <div class="ctm-wordmark">
+      <span class="ctm-wordmark-top">Control-M-style EM</span>
+      <span class="ctm-wordmark-sub">Datadog POC · B3 Demo</span>
     </div>
-    <div class="pipeline-badge badge-idle" id="pipelineBadge">Idle</div>
   </div>
+  <nav class="ctm-mainmenu">
+    <a>Planning</a>
+    <a class="active">Monitoring</a>
+    <a>Reporting</a>
+    <a id="nav-history" href="#" onclick="openHistory(); return false;">History</a>
+    <a>Tools</a>
+    <a>Help</a>
+  </nav>
+  <div class="ctm-header-right">
+    <div class="dd-links">
+      <a class="dd-link" href="https://app.{{ dd_site }}/dashboard/6ug-s4c-mu3/b3-control-m-pipeline-operations?fromUser=true&amp;refresh_mode=sliding&amp;from_ts=1779881715239&amp;to_ts=1779896115239&amp;live=true" target="_blank">📊 Dashboard</a>
+      <a class="dd-link" href="https://app.{{ dd_site }}/databases" target="_blank">📈 DBM</a>
+      <a class="dd-link" href="https://app.{{ dd_site }}/apm/traces?query=env%3Ademo%20service%3Acontrolm-sim" target="_blank">🔎 APM</a>
+      <a class="dd-link" href="https://app.{{ dd_site }}/logs?query=service%3A%28controlm-sim%20OR%20demo-cron%20OR%20demo-sqlserver%20OR%20demo-mysql%20OR%20demo-postgres%29&amp;live=true" target="_blank">📄 Logs</a>
+    </div>
+    <span class="env-pill">env · demo</span>
+    <span class="user-pill">👤 schawirin</span>
+  </div>
+</header>
+
+<!-- ═══════════════ SUB-HEADER (viewpoint info bar) ═══════════════ -->
+<div class="ctm-subheader">
+  <div class="sub-field">
+    <span class="sub-label">Viewpoint</span>
+    <span class="sub-value accent">b3_d1_pipeline</span>
+  </div>
+  <div class="sub-separator"></div>
+  <div class="sub-field">
+    <span class="sub-label">Datacenter</span>
+    <span class="sub-value">ctm-em-demo</span>
+  </div>
+  <div class="sub-separator"></div>
+  <div class="sub-field">
+    <span class="sub-label">Namespace</span>
+    <span class="sub-value">b3-poc</span>
+  </div>
+  <div class="sub-separator"></div>
+  <div class="sub-field">
+    <span class="sub-label">ODATE</span>
+    <span class="sub-value mono" id="subOdate">—</span>
+  </div>
+  <div class="sub-separator"></div>
+  <div class="sub-field">
+    <span class="sub-label">Pipeline</span>
+    <span class="sub-value mono" id="subRuntime">—</span>
+  </div>
+  <span class="pipeline-badge badge-idle" id="pipelineBadge">Idle</span>
 </div>
 
-<!-- ── LAYOUT ── -->
+<!-- ═══════════════ ACTION TOOLBAR (CTM ribbon) ═══════════════ -->
+<div class="ctm-toolbar">
+  <div class="tb-group">
+    <button class="tb-btn tb-btn-primary" id="btnStart" onclick="startPipeline()">
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><polygon points="3,2 14,8 3,14"/></svg>
+      Order &amp; Run
+    </button>
+    <button class="tb-btn" id="btnRerun" onclick="rerunSelected()" disabled>
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 8a5 5 0 1 1 1.5 3.5"/><path d="M3 12V8h4"/></svg>
+      Rerun
+    </button>
+  </div>
+  <div class="tb-sep"></div>
+  <div class="tb-group">
+    <button class="tb-btn tb-btn-warn" id="btnHold" onclick="ctmAction('hold')" disabled>
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="3" height="10"/><rect x="10" y="3" width="3" height="10"/></svg>
+      Hold
+    </button>
+    <button class="tb-btn tb-btn-ok" id="btnFree" onclick="ctmAction('free')" disabled>
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+      Free
+    </button>
+    <button class="tb-btn tb-btn-ok" id="btnConfirm" onclick="ctmAction('confirm')" disabled>
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,8 7,12 13,4"/></svg>
+      Confirm
+    </button>
+    <button class="tb-btn tb-btn-danger" id="btnForceOk" onclick="ctmAction('force_ok')" disabled>
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="8" r="6"/><polyline points="5,8 7,10 11,6" fill="none"/></svg>
+      Force OK
+    </button>
+  </div>
+  <div class="tb-sep"></div>
+  <div class="tb-group">
+    <button class="tb-btn" id="btnWhy" onclick="ctmAction('why')" disabled>
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="8" r="6"/><path d="M6 6c0-1 1-2 2-2s2 1 2 2-2 1-2 3"/><circle cx="8" cy="12" r="0.6" fill="currentColor"/></svg>
+      Why
+    </button>
+    <button class="tb-btn" id="btnSysout" onclick="ctmAction('sysout')" disabled>
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1"/><line x1="4" y1="6" x2="12" y2="6"/><line x1="4" y1="9" x2="9" y2="9"/></svg>
+      Sysout
+    </button>
+  </div>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" onclick="resetJobs()">
+    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 4v4h4"/><path d="M3 8a5 5 0 1 0 1.5-3.5"/></svg>
+    Reset
+  </button>
+  <button class="tb-btn" onclick="clearConsole()">
+    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10M5 4l1 9h4l1-9M7 7v4M9 7v4"/></svg>
+    Clear Sysout
+  </button>
+</div>
+
+<!-- ═══════════════ LAYOUT (sidebar + content) ═══════════════ -->
 <div class="layout">
 
-  <!-- ── LEFT SIDEBAR ── -->
-  <div class="sidebar">
+  <!-- ─── SIDEBAR ─── -->
+  <aside class="sidebar">
 
-    <!-- Run Controls -->
-    <div class="sidebar-section">
-      <div class="sidebar-title">Parâmetros de Execução</div>
+    <div class="sb-section">
+      <div class="sb-title">Run Parameters</div>
       <div class="form-group">
-        <label>Data de Negócio (ODATE)</label>
-        <input type="date" id="businessDate" />
+        <label>Business Date (ODATE)</label>
+        <input type="date" id="businessDate" onchange="updateSubOdate()" />
       </div>
       <div class="form-group">
-        <label>Injetar Falha</label>
+        <label>Inject Fault</label>
         <select id="faultType">
           <option value="">— Nenhuma (Happy Path) —</option>
           <optgroup label="DQ Faults (pipeline OK, gate FAIL)">
@@ -487,242 +884,421 @@
           </optgroup>
         </select>
       </div>
-      <button class="btn btn-primary btn-full" id="btnStart" onclick="startPipeline()">
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><polygon points="3,2 14,8 3,14"/></svg>
-        Order &amp; Run Pipeline
-      </button>
-      <div style="margin-top:8px; display:flex; gap:6px;">
-        <button class="btn btn-ghost btn-sm" id="btnClear" onclick="clearConsole()">Limpar Console</button>
-      </div>
     </div>
 
-    <!-- Job Steps queue -->
-    <div class="sidebar-section" style="flex:1">
-      <div class="sidebar-title" style="display:flex;align-items:center;justify-content:space-between;">
-        <span>Steps da Pipeline</span>
-        <button class="btn btn-blue btn-sm" onclick="openAddStep()">+ Add Step</button>
+    <div class="sb-section" style="flex:1">
+      <div class="sb-title">
+        <span>Pipeline Folders</span>
+        <button class="btn btn-primary btn-sm" onclick="openJobModal()">+ New Job</button>
       </div>
       <ul class="step-list" id="stepList"></ul>
-
-      <!-- Add step inline form -->
-      <div class="add-step-form" id="addStepForm" style="margin-top:12px;">
-        <div class="sidebar-title">Novo Step</div>
-        <div class="form-group">
-          <label>Nome do Job</label>
-          <input type="text" id="newStepName" placeholder="ex: validate_positions" />
-        </div>
-        <div class="form-group">
-          <label>Descrição</label>
-          <input type="text" id="newStepDesc" placeholder="O que este step faz..." />
-        </div>
-        <div class="form-group">
-          <label>SLA (segundos)</label>
-          <input type="text" id="newStepSla" placeholder="ex: 300" />
-        </div>
-        <div class="form-group">
-          <label>Depende de</label>
-          <select id="newStepDep">
-            <option value="">(nenhuma)</option>
-            <option value="close_market_eod">close_market_eod</option>
-            <option value="reconcile_d1_positions">reconcile_d1_positions</option>
-            <option value="quality_gate_d1">quality_gate_d1</option>
-            <option value="publish_d1_reports">publish_d1_reports</option>
-          </select>
-        </div>
-        <div style="display:flex;gap:6px;">
-          <button class="btn btn-blue btn-sm" onclick="confirmAddStep()">Adicionar</button>
-          <button class="btn btn-ghost btn-sm" onclick="cancelAddStep()">Cancelar</button>
-        </div>
-      </div>
     </div>
 
-    <!-- Selected job edit panel -->
-    <div class="sidebar-section job-edit-panel" id="jobEditPanel" style="display:none">
-      <div class="job-edit-header">
-        <div class="step-dot step-dot-wait" id="editDot"></div>
-        <span class="job-edit-name" id="editJobName">—</span>
-        <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="closeEditPanel()">✕</button>
+    <div class="job-detail-panel" id="jobEditPanel" style="display:none">
+      <div class="job-detail-header">
+        <div class="step-status-icon ssi-wait" id="editDot">·</div>
+        <span class="job-detail-name" id="editJobName">—</span>
+        <button class="job-detail-close" onclick="closeEditPanel()">✕</button>
       </div>
-      <div class="job-edit-desc" id="editJobDesc">—</div>
-      <div class="job-edit-fields">
+      <div class="job-detail-body">
+        <div class="job-detail-desc" id="editJobDesc">—</div>
         <div class="form-group">
-          <label>Date Override (deixe vazio p/ usar ODATE global)</label>
+          <label>Date Override</label>
           <input type="date" id="editDateOverride" />
         </div>
         <div class="form-group">
-          <label>Injetar Falha neste job específico</label>
+          <label>Inject Fault</label>
           <select id="editFault">
-            <option value="">— Nenhuma —</option>
+            <option value="">— None —</option>
             <option value="duplicate_trades">Caso 1: Duplicatas</option>
             <option value="null_settlement_price">Caso 2: Nulo</option>
             <option value="zero_sum_positions">Caso 3: Soma zero</option>
             <option value="all">Todos os 3 casos</option>
           </select>
         </div>
-        <div style="display:flex;gap:6px;margin-top:4px;">
-          <button class="btn btn-blue btn-sm btn-full" onclick="runSingleJob()">
-            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><polygon points="3,2 14,8 3,14"/></svg>
-            Run Job
+        <div style="display:flex;gap:6px;margin-top:6px;">
+          <button class="btn btn-primary btn-sm btn-full" onclick="runSingleJob()">
+            <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor"><polygon points="3,2 14,8 3,14"/></svg>
+            Run Single
           </button>
-          <button class="btn btn-ghost btn-sm" onclick="saveJobParams()">Salvar</button>
+          <button class="btn btn-ghost btn-sm" onclick="saveJobParams()">Save</button>
         </div>
       </div>
     </div>
 
-  </div><!-- end sidebar -->
+  </aside>
 
-  <!-- ── MAIN CONTENT ── -->
-  <div class="content">
+  <!-- ─── MAIN CONTENT ─── -->
+  <main class="content">
 
-    <!-- Toolbar -->
-    <div class="toolbar">
-      <span class="toolbar-label">Pipeline:</span>
-      <span style="font-weight:700;color:var(--blue);font-size:13px;">market_d1_pipeline</span>
-      <div class="toolbar-sep"></div>
-      <span class="toolbar-label">Namespace:</span>
-      <span style="font-size:13px;color:var(--text-muted)">exchange-poc</span>
-      <div class="toolbar-sep"></div>
-      <span class="toolbar-label">Env:</span>
-      <span style="font-size:13px;color:var(--cyan)">demo</span>
-      <div class="toolbar-sep"></div>
-      <span id="toolbarStatus" style="font-size:12px;color:var(--text-muted)">Aguardando ordem...</span>
-      <div style="margin-left:auto;display:flex;gap:8px">
-        <button class="btn btn-ghost btn-sm" onclick="resetJobs()">&#x21BA; Reset</button>
+    <div class="view-tabs">
+      <button class="view-tab active" data-view="tabular" onclick="switchView('tabular')">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1"/><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="9" x2="14" y2="9"/></svg>
+        Tabular
+        <span class="view-tab-count" id="tabularCount">0</span>
+      </button>
+      <button class="view-tab" data-view="network" onclick="switchView('network')">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="3" cy="8" r="2"/><circle cx="13" cy="4" r="2"/><circle cx="13" cy="12" r="2"/><line x1="5" y1="8" x2="11" y2="4"/><line x1="5" y1="8" x2="11" y2="12"/></svg>
+        Network
+      </button>
+      <div class="view-tabs-right">
+        <span class="view-mini-info" id="viewMiniInfo">— jobs · — running · — completed</span>
       </div>
     </div>
 
-    <!-- Job Order Monitor table -->
-    <div class="monitor-wrapper">
-      <table class="monitor-table" id="monitorTable">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Job Name</th>
-            <th>Status</th>
-            <th>Start</th>
-            <th>End</th>
-            <th>Duration</th>
-            <th>SLA</th>
-            <th>Retries</th>
-            <th>Fault</th>
-          </tr>
-        </thead>
-        <tbody id="monitorBody"></tbody>
-      </table>
-    </div>
+    <!-- TABULAR VIEW -->
+    <div class="view-pane active" id="paneTabular">
+      <div class="monitor-wrapper">
+        <table class="monitor-table" id="monitorTable">
+          <thead>
+            <tr>
+              <th>Order ID</th>
+              <th>Job Name</th>
+              <th>Status</th>
+              <th>Start</th>
+              <th>End</th>
+              <th>Duration</th>
+              <th>SLA</th>
+              <th>Retries</th>
+              <th>Fault</th>
+            </tr>
+          </thead>
+          <tbody id="monitorBody"></tbody>
+        </table>
+      </div>
 
-    <!-- Files exported -->
-    <div class="files-panel" id="filesPanel">
-      <span class="files-label">Arquivos exportados:</span>
-      <span id="filesList"></span>
-    </div>
+      <div class="files-panel" id="filesPanel">
+        <span class="files-label">Output Files</span>
+        <span id="filesList"></span>
+      </div>
 
-    <!-- DQ Results inline -->
-    <div class="dq-panel" id="dqPanel">
-      <div class="dq-title">Quality Gate Results</div>
-      <div class="dq-grid" id="dqGrid"></div>
-    </div>
+      <div class="dq-panel" id="dqPanel">
+        <div class="dq-title">Quality Gate Results</div>
+        <div class="dq-grid" id="dqGrid"></div>
+      </div>
 
-    <!-- Console -->
-    <div class="console-section">
-      <div class="console-header">
-        <div class="console-header-left">
-          <span class="console-dot dot-r"></span>
-          <span class="console-dot dot-y"></span>
-          <span class="console-dot dot-g"></span>
-          <span class="console-title">pipeline output</span>
+      <div class="console-section">
+        <div class="console-header">
+          <div class="console-header-left">
+            <span class="console-title">Sysout — pipeline output</span>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="text" class="console-filter" id="consoleFilter" placeholder="filter (ex: close_market_eod)" oninput="filterConsole()" />
+            <span style="font-size:10px;color:var(--text-dim)" id="lineCount">0 lines</span>
+          </div>
         </div>
-        <span style="font-size:11px;color:var(--text-muted)" id="lineCount">0 lines</span>
+        <div class="console-body" id="console"></div>
       </div>
-      <div class="console-body" id="console"></div>
     </div>
 
-  </div><!-- end content -->
-</div><!-- end layout -->
+    <!-- NETWORK VIEW -->
+    <div class="view-pane" id="paneNetwork">
+      <div class="network-pane" style="flex:1; position:relative;">
+        <div id="networkCanvas"></div>
+        <div class="network-actions">
+          <button class="btn btn-sm" onclick="cyFit()">Fit</button>
+          <button class="btn btn-sm" onclick="cyRelayout()">Re-layout</button>
+        </div>
+        <div class="network-legend">
+          <div class="legend-item"><span class="legend-swatch" style="background:var(--st-wait-bg);border-color:var(--st-wait)"></span> Waiting</div>
+          <div class="legend-item"><span class="legend-swatch" style="background:var(--st-exec-bg);border-color:var(--accent)"></span> Executing</div>
+          <div class="legend-item"><span class="legend-swatch" style="background:var(--st-ok-bg);border-color:var(--st-ok)"></span> Ended OK</div>
+          <div class="legend-item"><span class="legend-swatch" style="background:var(--st-fail-bg);border-color:var(--st-fail)"></span> Ended NOT OK</div>
+          <div class="legend-item"><span class="legend-swatch" style="background:var(--st-held-bg);border-color:var(--st-held)"></span> Held / SLA</div>
+        </div>
+      </div>
+    </div>
 
-<!-- ── ADD STEP MODAL (fallback full modal) ── -->
-<div class="modal-overlay" id="addStepModal">
-  <div class="modal">
-    <div class="modal-title">Add Custom Step</div>
-    <div class="form-group">
-      <label>Job Name</label>
-      <input type="text" id="modalStepName" placeholder="ex: validate_cash_positions" />
+  </main>
+</div>
+
+<!-- ═══════════════ STATUS BAR (bottom CTM band) ═══════════════ -->
+<footer class="ctm-statusbar">
+  <div class="sb-stat"><span class="sb-stat-dot" style="background:var(--st-ok)"></span><span>OK</span><strong id="sbOk">0</strong></div>
+  <div class="sb-stat"><span class="sb-stat-dot" style="background:var(--st-exec)"></span><span>EXEC</span><strong id="sbExec">0</strong></div>
+  <div class="sb-stat"><span class="sb-stat-dot" style="background:var(--st-wait)"></span><span>WAIT</span><strong id="sbWait">0</strong></div>
+  <div class="sb-stat"><span class="sb-stat-dot" style="background:var(--st-fail)"></span><span>FAIL</span><strong id="sbFail">0</strong></div>
+  <div class="sb-stat"><span>Last update</span><strong id="sbLast">—</strong></div>
+  <span class="sb-version">CTM-EM Demo · Metrics · DBM · Logs · APM</span>
+</footer>
+
+<!-- ═══════════════ JOB PROPERTIES MODAL ═══════════════ -->
+<div class="modal-overlay" id="jobModal">
+  <div class="jp-modal">
+    <div class="jp-modal-header">
+      <div class="jp-modal-icon">JOB</div>
+      <div>
+        <div class="jp-modal-title" id="jpTitle">New Job</div>
+        <div class="jp-modal-sub" id="jpSubtitle">Job Properties</div>
+      </div>
+      <button class="jp-modal-close" onclick="closeJobModal()">✕</button>
     </div>
-    <div class="form-group">
-      <label>Command / Script</label>
-      <textarea id="modalStepCmd" placeholder="python /jobs/my_job.py --date %%ODATE%%"></textarea>
+
+    <div class="jp-tabs">
+      <button class="jp-tab active" data-pane="general" onclick="jpSwitchTab('general')">General</button>
+      <button class="jp-tab" data-pane="execution" onclick="jpSwitchTab('execution')">Execution</button>
+      <button class="jp-tab" data-pane="deps" onclick="jpSwitchTab('deps')">Dependencies</button>
+      <button class="jp-tab" data-pane="advanced" onclick="jpSwitchTab('advanced')">Advanced</button>
     </div>
-    <div class="form-group">
-      <label>SLA (seconds)</label>
-      <input type="text" id="modalStepSla" placeholder="300" />
+
+    <div class="jp-body">
+      <!-- ─── GENERAL ─── -->
+      <div class="jp-pane active" data-pane="general">
+        <div class="form-group">
+          <label>Job Name *</label>
+          <input type="text" id="jpName" placeholder="ex: validate_cash_positions" />
+          <div class="type-help">Identifier: alphanumeric, <code>_</code> and <code>-</code> only. Used as the Order ID in the monitor.</div>
+        </div>
+        <div class="jp-row">
+          <div class="form-group">
+            <label>Folder</label>
+            <input type="text" id="jpFolder" value="CUSTOM" placeholder="PRD-MKT-D1" />
+          </div>
+          <div class="form-group">
+            <label>Application</label>
+            <input type="text" id="jpApplication" value="Custom" placeholder="Capital Markets" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea id="jpDescription" placeholder="What this job does..."></textarea>
+        </div>
+      </div>
+
+      <!-- ─── EXECUTION ─── -->
+      <div class="jp-pane" data-pane="execution">
+        <div class="form-group">
+          <label>Job Type *</label>
+          <select id="jpType" onchange="jpOnTypeChange()">
+            <option value="shell">Shell command (bash -c)</option>
+            <option value="python">Python (script or inline)</option>
+            <option value="sql">SQL query</option>
+            <option value="etl_template">ETL template (Oracle → SQL Server)</option>
+          </select>
+        </div>
+
+        <!-- shell + python -->
+        <div id="jpCmdBlock">
+          <div class="form-group">
+            <label id="jpCmdLabel">Command *</label>
+            <textarea id="jpCommand" rows="5" placeholder="echo &quot;Hello $ODATE&quot;"></textarea>
+            <div class="type-help" id="jpCmdHelp">
+              Runs <code>bash -c &lt;command&gt;</code>. Env vars: <code>ODATE</code>, <code>BUSINESS_DATE</code>, <code>DD_ENV</code>.
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Working Directory</label>
+            <input type="text" id="jpWorkdir" value="/app" placeholder="/app" />
+          </div>
+        </div>
+
+        <!-- sql -->
+        <div id="jpSqlBlock" style="display:none">
+          <div class="form-group">
+            <label>Target Database *</label>
+            <select id="jpTargetDb">
+              <option value="oracle">Oracle (source)</option>
+              <option value="sqlserver">SQL Server (DW)</option>
+              <option value="mysql">MySQL (legacy)</option>
+              <option value="postgres">Postgres (dbt)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Expected Check (optional)</label>
+            <div class="jp-row" style="margin-bottom:0">
+              <select id="jpExpectedCheck">
+                <option value="">— none —</option>
+                <option value="count_gt">row count &gt;</option>
+                <option value="count_eq">row count =</option>
+                <option value="value_eq">first cell =</option>
+              </select>
+              <input type="text" id="jpExpectedValue" placeholder="value" />
+            </div>
+            <div class="type-help">Job fails if the assertion does not hold. Useful for DQ checks.</div>
+          </div>
+        </div>
+
+        <!-- etl_template -->
+        <div id="jpEtlBlock" style="display:none">
+          <div class="jp-row">
+            <div class="form-group">
+              <label>Source Table (Oracle) *</label>
+              <input type="text" id="jpSrcTable" placeholder="ASTADRVT_TRADE_MVMT" />
+            </div>
+            <div class="form-group">
+              <label>Target Table (SQL Server) *</label>
+              <input type="text" id="jpTgtTable" placeholder="ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO" />
+            </div>
+          </div>
+          <div class="type-help">
+            Runs <code>SELECT * FROM &lt;src&gt; WHERE business_date = :ODATE</code> on Oracle,
+            <code>DELETE</code> the same day in the target, then <code>INSERT</code> all rows. Idempotent.
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── DEPENDENCIES ─── -->
+      <div class="jp-pane" data-pane="deps">
+        <div class="form-group">
+          <label>In Conditions (predecessor jobs)</label>
+          <div class="jp-deps-list" id="jpDepsList">
+            <div style="color:var(--text-dim);font-size:11px">No jobs available.</div>
+          </div>
+          <div class="type-help">This job waits until ALL checked predecessors reach ENDED OK.</div>
+        </div>
+      </div>
+
+      <!-- ─── ADVANCED ─── -->
+      <div class="jp-pane" data-pane="advanced">
+        <div class="jp-row">
+          <div class="form-group">
+            <label>SLA (seconds)</label>
+            <input type="text" id="jpSla" value="300" />
+          </div>
+          <div class="form-group">
+            <label>Retry Count</label>
+            <input type="text" id="jpRetries" value="0" />
+          </div>
+        </div>
+        <div class="type-help">
+          On failure, the executor retries up to <em>Retry Count</em> times with exponential backoff (capped at 10s).
+          SLA timeout kills the process and marks the run as failed.
+        </div>
+      </div>
     </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-blue" onclick="confirmModalStep()">Add Step</button>
+
+    <div class="jp-modal-footer">
+      <span class="jp-err" id="jpError"></span>
+      <button class="btn btn-ghost" onclick="closeJobModal()">Cancel</button>
+      <button class="btn btn-primary" id="jpSaveBtn" onclick="saveJobModal()">Save Job</button>
     </div>
   </div>
 </div>
 
 <script>
-/* ────────────────────────────────────────────────────────── */
-/*  STATE                                                      */
-/* ────────────────────────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════════
+   STATE
+   ════════════════════════════════════════════════════════════════ */
 
-const JOB_DEFS = [
-  { id:'close_market_eod',         label:'close_market_eod',          dep:null,                          sla:600,  desc:'ETL: Oracle ASTADRVT_TRADE_MVMT → SQL Server ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO' },
-  { id:'reconcile_d1_positions',   label:'reconcile_d1_positions',    dep:'close_market_eod',            sla:900,  desc:'ETL: Oracle ASTANO/ASTACASH → SQL Server ADWPM_POSICAO_*' },
-  { id:'quality_gate_d1',          label:'quality_gate_d1',           dep:'reconcile_d1_positions',      sla:300,  desc:'DQ: 5 checks (duplicatas, nulos, soma-zero, row-count, overflow) → ADWPM_DQ_RESULTS' },
-  { id:'publish_d1_reports',       label:'publish_d1_reports',        dep:'quality_gate_d1',             sla:600,  desc:'Export: SQL Server DW → MinIO Parquet/CSV' },
-];
+let JOB_DEFS = []; // populated from /api/catalog
+let CATALOG = {};  // raw catalog map (id → full job record)
 
-let jobs = {};         // { id: { status, start, end, retries, sla_miss, fault, result } }
+let jobs = {};
 let selectedJob = null;
-let jobOverrides = {}; // { id: { fault, date } }
+let jobOverrides = {};
 let lineCount = 0;
 let eventSource = null;
 let pipelineRunning = false;
+let currentView = 'tabular';
+let cy = null;
+let pipelineStart = null;
+let runtimeTicker = null;
 
-/* ────────────────────────────────────────────────────────── */
-/*  INIT                                                       */
-/* ────────────────────────────────────────────────────────── */
+const STATUS_LABEL = {
+  'WAITING':'WAIT_HOST',
+  'RUNNING':'EXECUTING',
+  'ENDED OK':'ENDED OK',
+  'ENDED NOT OK':'ENDED NOT OK',
+  'HELD':'HELD',
+};
+
+/* ════════════════════════════════════════════════════════════════
+   INIT
+   ════════════════════════════════════════════════════════════════ */
 
 document.getElementById('businessDate').value = new Date().toISOString().split('T')[0];
+updateSubOdate();
 
 function initJobs() {
   jobs = {};
   JOB_DEFS.forEach(j => {
-    jobs[j.id] = { status:'WAITING', start:null, end:null, retries:0, sla_miss:false, fault:null, result:null };
+    if (!jobs[j.id]) jobs[j.id] = { status:'WAITING', start:null, end:null, retries:0, sla_miss:false, fault:null, result:null };
   });
   renderStepList();
   renderMonitorTable();
+  refreshNetwork();
+  updateCounts();
 }
 
-initJobs();
+function loadCatalog(preserveStatus = false) {
+  return fetch('/api/catalog').then(r => r.json()).then(data => {
+    CATALOG = data;
+    JOB_DEFS = Object.values(data).map(j => ({
+      id: j.id,
+      label: j.label || j.id,
+      dep: (j.depends_on && j.depends_on.length) ? j.depends_on[0] : null,
+      deps: j.depends_on || [],
+      sla: j.sla_seconds,
+      desc: j.description,
+      type: j.type,
+      builtin: !!j.builtin,
+    }));
+    if (preserveStatus) {
+      // ensure new jobs get a default status entry without wiping running state
+      JOB_DEFS.forEach(j => {
+        if (!jobs[j.id]) jobs[j.id] = { status:'WAITING', start:null, end:null, retries:0, sla_miss:false };
+      });
+      renderStepList(); renderMonitorTable(); refreshNetwork(); updateCounts();
+    } else {
+      initJobs();
+    }
+    if (cy) initNetwork();
+  }).catch(err => log('error', `[CTM] Falha ao carregar catalog: ${err}`));
+}
+
+loadCatalog();
 connectSSE();
 
-/* ────────────────────────────────────────────────────────── */
-/*  RENDER STEP LIST (sidebar)                                 */
-/* ────────────────────────────────────────────────────────── */
+function updateSubOdate() {
+  document.getElementById('subOdate').textContent = document.getElementById('businessDate').value || '—';
+}
+
+/* ════════════════════════════════════════════════════════════════
+   STEP LIST (sidebar)
+   ════════════════════════════════════════════════════════════════ */
+
+function statusIconClass(status) {
+  return { 'WAITING':'ssi-wait','RUNNING':'ssi-exec','ENDED OK':'ssi-ok','ENDED NOT OK':'ssi-fail','HELD':'ssi-held' }[status] || 'ssi-wait';
+}
+function statusIconChar(status) {
+  return { 'WAITING':'·','RUNNING':'▶','ENDED OK':'✓','ENDED NOT OK':'✕','HELD':'⏸' }[status] || '·';
+}
 
 function renderStepList() {
   const el = document.getElementById('stepList');
   el.innerHTML = '';
   JOB_DEFS.forEach(j => {
     const st = jobs[j.id] || {};
-    const dotClass = { 'WAITING':'step-dot-wait', 'RUNNING':'step-dot-run', 'ENDED OK':'step-dot-ok', 'ENDED NOT OK':'step-dot-fail' }[st.status] || 'step-dot-wait';
     const li = document.createElement('li');
     li.className = 'step-item' + (selectedJob === j.id ? ' selected' : '');
-    li.innerHTML = `<span class="step-dot ${dotClass}"></span>
+    const editBtn = !j.builtin
+      ? `<button class="step-action-btn" title="Edit" onclick="event.stopPropagation(); openJobModal('${j.id}')">✎</button>
+         <button class="step-action-btn delete" title="Delete" onclick="event.stopPropagation(); deleteJob('${j.id}')">🗑</button>`
+      : `<span class="step-action-btn" style="visibility:hidden">✎</span>`;
+    li.innerHTML = `
+      <span class="step-status-icon ${statusIconClass(st.status)}">${statusIconChar(st.status)}</span>
       <span class="step-name">${j.label}</span>
-      <span class="step-sla">${j.sla}s SLA</span>`;
+      <span class="step-sla">${j.sla}s</span>
+      ${editBtn}`;
     li.onclick = () => selectJob(j.id);
     el.appendChild(li);
   });
 }
 
-/* ────────────────────────────────────────────────────────── */
-/*  RENDER MONITOR TABLE                                       */
-/* ────────────────────────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════════
+   MONITOR TABLE (tabular)
+   ════════════════════════════════════════════════════════════════ */
+
+function makeChip(status) {
+  const map = {
+    'WAITING':      `<span class="chip chip-wait"><span class="chip-dot" style="background:var(--st-wait)"></span>${STATUS_LABEL['WAITING']}</span>`,
+    'RUNNING':      `<span class="chip chip-exec"><span class="chip-dot" style="background:var(--st-exec)"></span>${STATUS_LABEL['RUNNING']}</span>`,
+    'ENDED OK':     `<span class="chip chip-ok"><span class="chip-dot" style="background:var(--st-ok)"></span>${STATUS_LABEL['ENDED OK']}</span>`,
+    'ENDED NOT OK': `<span class="chip chip-fail"><span class="chip-dot" style="background:var(--st-fail)"></span>${STATUS_LABEL['ENDED NOT OK']}</span>`,
+    'HELD':         `<span class="chip chip-held"><span class="chip-dot" style="background:var(--st-held)"></span>HELD</span>`,
+  };
+  return map[status] || `<span class="chip chip-wait">${status}</span>`;
+}
 
 function renderMonitorTable() {
   const tbody = document.getElementById('monitorBody');
@@ -734,70 +1310,208 @@ function renderMonitorTable() {
     const fault = ov.fault || st.fault || '';
 
     const statusChip = makeChip(st.status);
-    const slaChip = st.sla_miss ? '<span class="chip chip-sla">SLA MISS</span>' : (st.status==='ENDED OK' ? '<span style="color:var(--green);font-size:12px;font-weight:600">OK</span>' : '<span style="color:var(--text-muted);font-size:12px;">—</span>');
+    const slaChip = st.sla_miss
+      ? '<span class="chip chip-sla">SLA MISS</span>'
+      : (st.status==='ENDED OK'
+          ? '<span style="color:var(--st-ok);font-size:11px;font-weight:700">OK</span>'
+          : '<span style="color:var(--text-dim);font-size:11px">—</span>');
+
+    const orderId = `0000${(234+idx).toString().padStart(3,'0')}`;
 
     const tr = document.createElement('tr');
     tr.className = selectedJob === j.id ? 'selected-row' : '';
     tr.innerHTML = `
-      <td class="job-order-num">${String(idx+1).padStart(2,'0')}</td>
+      <td class="order-id">${orderId}</td>
       <td>
         <div class="job-name-cell">${j.label}${fault ? `<span class="fault-tag">${fault}</span>` : ''}</div>
         <div class="job-dep">${j.dep ? '↳ depends: '+j.dep : '─ pipeline start'}</div>
       </td>
       <td>${statusChip}</td>
-      <td class="mono" style="font-size:12px;color:var(--text-muted)">${st.start || '—'}</td>
-      <td class="mono" style="font-size:12px;color:var(--text-muted)">${st.end || '—'}</td>
-      <td class="mono" style="font-size:12px">${st.duration != null ? st.duration+'s' : '—'}</td>
+      <td class="mono" style="font-size:11px;color:var(--text-dim)">${st.start || '—'}</td>
+      <td class="mono" style="font-size:11px;color:var(--text-dim)">${st.end || '—'}</td>
+      <td class="mono" style="font-size:11px">${st.duration != null ? st.duration+'s' : '—'}</td>
       <td>${slaChip}</td>
-      <td style="font-size:12px;text-align:center">${st.retries || 0}</td>
-      <td style="font-size:11px;color:var(--yellow)">${fault || '—'}</td>
+      <td style="font-size:11px;text-align:center">${st.retries || 0}</td>
+      <td style="font-size:10px;color:var(--st-held)">${fault || '—'}</td>
     `;
     tr.onclick = () => selectJob(j.id);
     tbody.appendChild(tr);
   });
+
+  document.getElementById('tabularCount').textContent = JOB_DEFS.length;
 }
 
-function makeChip(status) {
-  const map = {
-    'WAITING':    `<span class="chip chip-wait"><span class="chip-dot" style="background:var(--gray)"></span>Waiting</span>`,
-    'RUNNING':    `<span class="chip chip-run"><span class="chip-dot" style="background:var(--blue)"></span>Running</span>`,
-    'ENDED OK':   `<span class="chip chip-ok"><span class="chip-dot" style="background:var(--green)"></span>Ended OK</span>`,
-    'ENDED NOT OK':`<span class="chip chip-fail"><span class="chip-dot" style="background:var(--red)"></span>Ended NOT OK</span>`,
-  };
-  return map[status] || `<span class="chip chip-wait">${status}</span>`;
+/* ════════════════════════════════════════════════════════════════
+   NETWORK VIEW (Cytoscape DAG)
+   ════════════════════════════════════════════════════════════════ */
+
+function statusToHexBg(status) {
+  return { 'WAITING':'#2D3F54','RUNNING':'#0A2A45','ENDED OK':'#1A3D24','ENDED NOT OK':'#3D1A1E','HELD':'#3D2E14' }[status] || '#2D3F54';
+}
+function statusToHexBorder(status) {
+  return { 'WAITING':'#6B7C90','RUNNING':'#0091D5','ENDED OK':'#2E9E3F','ENDED NOT OK':'#D63841','HELD':'#E8A33F' }[status] || '#6B7C90';
 }
 
-/* ────────────────────────────────────────────────────────── */
-/*  SELECT JOB → edit panel                                    */
-/* ────────────────────────────────────────────────────────── */
+function initNetwork() {
+  if (cy) { cy.destroy(); cy = null; }
+  const elements = [];
+  JOB_DEFS.forEach((j, idx) => {
+    const st = jobs[j.id] || {};
+    elements.push({
+      data: {
+        id: j.id,
+        label: j.label,
+        orderId: `0000${(234+idx).toString().padStart(3,'0')}`,
+        status: st.status || 'WAITING',
+        sla: j.sla,
+        bg: statusToHexBg(st.status),
+        border: statusToHexBorder(st.status),
+      }
+    });
+    if (j.dep) {
+      elements.push({ data: { id: `${j.dep}->${j.id}`, source: j.dep, target: j.id } });
+    }
+  });
+
+  cy = cytoscape({
+    container: document.getElementById('networkCanvas'),
+    elements,
+    style: [
+      {
+        selector: 'node',
+        style: {
+          'shape': 'round-rectangle',
+          'background-color': 'data(bg)',
+          'border-color': 'data(border)',
+          'border-width': 2,
+          'width': 200,
+          'height': 56,
+          'label': (n) => `${n.data('orderId')}\n${n.data('label')}\n${STATUS_LABEL[n.data('status')] || n.data('status')}`,
+          'text-wrap': 'wrap',
+          'text-max-width': 190,
+          'text-valign': 'center',
+          'text-halign': 'center',
+          'color': '#E8EEF5',
+          'font-size': 11,
+          'font-weight': 600,
+          'font-family': 'Segoe UI, -apple-system, sans-serif',
+          'line-height': 1.3,
+        }
+      },
+      {
+        selector: 'node:selected',
+        style: {
+          'border-width': 3,
+          'border-color': '#1FA8E0',
+          'overlay-color': '#0091D5',
+          'overlay-opacity': 0.15,
+        }
+      },
+      {
+        selector: 'edge',
+        style: {
+          'width': 2,
+          'line-color': '#4A5F77',
+          'target-arrow-color': '#4A5F77',
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+          'arrow-scale': 1.3,
+        }
+      }
+    ],
+    layout: {
+      name: 'dagre',
+      rankDir: 'LR',
+      nodeSep: 40,
+      rankSep: 90,
+      animate: false,
+    },
+    wheelSensitivity: 0.2,
+    minZoom: 0.4,
+    maxZoom: 2,
+  });
+
+  cy.on('tap', 'node', (evt) => {
+    selectJob(evt.target.id());
+  });
+}
+
+function refreshNetwork() {
+  if (currentView !== 'network' || !cy) return;
+  JOB_DEFS.forEach(j => {
+    const n = cy.$id(j.id);
+    if (!n.length) return;
+    const st = jobs[j.id] || {};
+    n.data('status', st.status);
+    n.data('bg', statusToHexBg(st.status));
+    n.data('border', statusToHexBorder(st.status));
+  });
+}
+
+function cyFit()      { if (cy) cy.fit(undefined, 40); }
+function cyRelayout() { if (cy) cy.layout({ name: 'dagre', rankDir: 'LR', nodeSep: 40, rankSep: 90, animate: true }).run(); }
+
+function switchView(view) {
+  currentView = view;
+  document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+  document.querySelectorAll('.view-pane').forEach(p => p.classList.remove('active'));
+  document.getElementById('pane' + view.charAt(0).toUpperCase() + view.slice(1)).classList.add('active');
+
+  if (view === 'network') {
+    if (!cy) initNetwork();
+    else refreshNetwork();
+    setTimeout(() => { if (cy) { cy.resize(); cy.fit(undefined, 40); } }, 50);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   SELECT JOB → edit panel + CTM action buttons
+   ════════════════════════════════════════════════════════════════ */
 
 function selectJob(id) {
   selectedJob = id;
   const def = JOB_DEFS.find(j => j.id === id);
-  const ov  = jobOverrides[id] || {};
-  const st  = jobs[id] || {};
+  if (!def) return;
+  const ov = jobOverrides[id] || {};
+  const st = jobs[id] || {};
 
-  // Update sidebar selection
   renderStepList();
   renderMonitorTable();
+  if (cy && currentView === 'network') {
+    cy.$('node:selected').unselect();
+    cy.$id(id).select();
+  }
 
-  // Show edit panel
   document.getElementById('jobEditPanel').style.display = 'block';
   document.getElementById('editJobName').textContent = def.label;
   document.getElementById('editJobDesc').textContent = def.desc;
   document.getElementById('editDateOverride').value = ov.date || '';
   document.getElementById('editFault').value = ov.fault || '';
 
-  // Dot color
-  const dotClass = { 'WAITING':'var(--gray)', 'RUNNING':'var(--blue)', 'ENDED OK':'var(--green)', 'ENDED NOT OK':'var(--red)' }[st.status] || 'var(--gray)';
-  document.getElementById('editDot').style.background = dotClass;
+  const dot = document.getElementById('editDot');
+  dot.className = 'step-status-icon ' + statusIconClass(st.status);
+  dot.textContent = statusIconChar(st.status);
+
+  const isRunning = st.status === 'RUNNING';
+  const isFailed = st.status === 'ENDED NOT OK';
+  const isWaiting = st.status === 'WAITING';
+  const isHeld = st.status === 'HELD';
+  document.getElementById('btnHold').disabled    = !(isRunning || isWaiting);
+  document.getElementById('btnFree').disabled    = !isHeld;
+  document.getElementById('btnConfirm').disabled = !isWaiting;
+  document.getElementById('btnRerun').disabled   = !(isFailed || st.status === 'ENDED OK');
+  document.getElementById('btnForceOk').disabled = !isFailed;
+  document.getElementById('btnWhy').disabled     = !id;
+  document.getElementById('btnSysout').disabled  = !id;
 }
 
 function closeEditPanel() {
   selectedJob = null;
   document.getElementById('jobEditPanel').style.display = 'none';
+  ['btnHold','btnFree','btnConfirm','btnRerun','btnForceOk','btnWhy','btnSysout'].forEach(id => document.getElementById(id).disabled = true);
   renderStepList();
   renderMonitorTable();
+  if (cy) cy.$('node:selected').unselect();
 }
 
 function saveJobParams() {
@@ -807,7 +1521,7 @@ function saveJobParams() {
     fault: document.getElementById('editFault').value || null,
   };
   renderMonitorTable();
-  log('info', `[CTM] Job ${selectedJob} — parâmetros salvos`);
+  log('info', `[CTM] Job ${selectedJob} — parameters saved`);
 }
 
 function runSingleJob() {
@@ -816,7 +1530,7 @@ function runSingleJob() {
   const date = jobOverrides[selectedJob]?.date || document.getElementById('businessDate').value;
   const fault = jobOverrides[selectedJob]?.fault || null;
 
-  log('job-start', `[CTM] Disparando job individual: ${selectedJob}`);
+  log('job-start', `[CTM] Order single job: ${selectedJob}`);
 
   fetch(`/api/run/${selectedJob}`, {
     method:'POST',
@@ -824,68 +1538,307 @@ function runSingleJob() {
     body: JSON.stringify({ business_date: date, inject_fault: fault }),
   })
   .then(r => r.json())
-  .then(d => {
-    if (d.error) log('error', `[CTM] Erro: ${d.error}`);
+  .then(d => { if (d.error) log('error', `[CTM] Erro: ${d.error}`); })
+  .catch(err => log('error', `[CTM] Falha: ${err}`));
+}
+
+function rerunSelected() {
+  if (!selectedJob) return;
+  runSingleJob();
+}
+
+/* ════════════════════════════════════════════════════════════════
+   CTM ACTIONS (Why / Sysout / Hold / Free / Confirm / Force OK)
+   Demo stubs — log into console, no destructive runtime impact.
+   ════════════════════════════════════════════════════════════════ */
+
+function ctmAction(kind) {
+  if (!selectedJob) return;
+  const def = JOB_DEFS.find(j => j.id === selectedJob);
+  const st  = jobs[selectedJob] || {};
+
+  switch (kind) {
+    case 'why': {
+      const lines = [
+        `── WHY ──────────────────────────────────────`,
+        `Job:        ${def.label}`,
+        `Order ID:   0000${(234 + JOB_DEFS.indexOf(def)).toString().padStart(3,'0')}`,
+        `Status:     ${STATUS_LABEL[st.status] || st.status}`,
+        `Depends on: ${def.dep || '(none — pipeline start)'}`,
+        `SLA:        ${def.sla}s`,
+        `Last start: ${st.start || '—'}`,
+        `Last end:   ${st.end || '—'}`,
+        `Retries:    ${st.retries || 0}`,
+        st.status === 'WAITING' && def.dep
+          ? `Reason:     Waiting for "${def.dep}" to reach ENDED OK.`
+          : st.status === 'ENDED NOT OK'
+            ? `Reason:     Job ended NOT OK — see Sysout.`
+            : st.status === 'ENDED OK'
+              ? `Reason:     Job completed successfully.`
+              : `Reason:     —`,
+        `────────────────────────────────────────────`,
+      ];
+      lines.forEach(l => log('info', l));
+      break;
+    }
+    case 'sysout': {
+      document.getElementById('consoleFilter').value = def.label;
+      filterConsole();
+      log('info', `[CTM] Sysout filter applied: ${def.label}`);
+      break;
+    }
+    case 'hold': {
+      jobs[selectedJob].status = 'HELD';
+      log('warn', `[CTM] HOLD — ${def.label} marked as HELD (demo: no runtime effect)`);
+      selectJob(selectedJob);
+      renderMonitorTable();
+      refreshNetwork();
+      updateCounts();
+      break;
+    }
+    case 'free': {
+      jobs[selectedJob].status = 'WAITING';
+      log('success', `[CTM] FREE — ${def.label} released from HELD`);
+      selectJob(selectedJob);
+      renderMonitorTable();
+      refreshNetwork();
+      updateCounts();
+      break;
+    }
+    case 'confirm': {
+      log('success', `[CTM] CONFIRM — ${def.label} acknowledged (demo)`);
+      break;
+    }
+    case 'force_ok': {
+      jobs[selectedJob].status = 'ENDED OK';
+      log('warn', `[CTM] FORCE OK — ${def.label} marked as ENDED OK (manual override, demo)`);
+      selectJob(selectedJob);
+      renderMonitorTable();
+      refreshNetwork();
+      updateCounts();
+      break;
+    }
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   JOB PROPERTIES MODAL  (create/edit custom jobs)
+   ════════════════════════════════════════════════════════════════ */
+
+let jpEditing = null; // job id being edited, or null for create
+
+function openJobModal(jobId = null) {
+  jpEditing = jobId;
+  jpClearError();
+  jpSwitchTab('general');
+
+  if (jobId && CATALOG[jobId]) {
+    const j = CATALOG[jobId];
+    if (j.builtin) {
+      log('warn', `[CTM] '${jobId}' é built-in — não pode ser editado.`);
+      return;
+    }
+    document.getElementById('jpTitle').textContent = `Edit Job — ${j.id}`;
+    document.getElementById('jpSubtitle').textContent = `Folder: ${j.folder} · Type: ${j.type}`;
+    document.getElementById('jpName').value = j.id;
+    document.getElementById('jpName').disabled = true;
+    document.getElementById('jpFolder').value = j.folder || 'CUSTOM';
+    document.getElementById('jpApplication').value = j.application || 'Custom';
+    document.getElementById('jpDescription').value = j.description || '';
+    document.getElementById('jpType').value = j.type;
+    document.getElementById('jpCommand').value = j.command || '';
+    document.getElementById('jpWorkdir').value = j.working_dir || '/app';
+    document.getElementById('jpTargetDb').value = j.target_db || 'oracle';
+    document.getElementById('jpSrcTable').value = j.src_table || '';
+    document.getElementById('jpTgtTable').value = j.tgt_table || '';
+    if (j.expected) {
+      document.getElementById('jpExpectedCheck').value = j.expected.check || '';
+      document.getElementById('jpExpectedValue').value = j.expected.value || '';
+    } else {
+      document.getElementById('jpExpectedCheck').value = '';
+      document.getElementById('jpExpectedValue').value = '';
+    }
+    document.getElementById('jpSla').value = j.sla_seconds || 300;
+    document.getElementById('jpRetries').value = j.retries || 0;
+    jpRenderDeps(j.depends_on || []);
+  } else {
+    document.getElementById('jpTitle').textContent = 'New Job';
+    document.getElementById('jpSubtitle').textContent = 'Job Properties';
+    document.getElementById('jpName').value = '';
+    document.getElementById('jpName').disabled = false;
+    document.getElementById('jpFolder').value = 'CUSTOM';
+    document.getElementById('jpApplication').value = 'Custom';
+    document.getElementById('jpDescription').value = '';
+    document.getElementById('jpType').value = 'shell';
+    document.getElementById('jpCommand').value = '';
+    document.getElementById('jpWorkdir').value = '/app';
+    document.getElementById('jpTargetDb').value = 'oracle';
+    document.getElementById('jpSrcTable').value = '';
+    document.getElementById('jpTgtTable').value = '';
+    document.getElementById('jpExpectedCheck').value = '';
+    document.getElementById('jpExpectedValue').value = '';
+    document.getElementById('jpSla').value = 300;
+    document.getElementById('jpRetries').value = 0;
+    jpRenderDeps([]);
+  }
+
+  jpOnTypeChange();
+  document.getElementById('jobModal').classList.add('visible');
+}
+
+function closeJobModal() {
+  document.getElementById('jobModal').classList.remove('visible');
+  jpEditing = null;
+}
+
+function jpSwitchTab(name) {
+  document.querySelectorAll('.jp-tab').forEach(t => t.classList.toggle('active', t.dataset.pane === name));
+  document.querySelectorAll('.jp-pane').forEach(p => p.classList.toggle('active', p.dataset.pane === name));
+}
+
+function jpOnTypeChange() {
+  const t = document.getElementById('jpType').value;
+  const cmd = document.getElementById('jpCmdBlock');
+  const sql = document.getElementById('jpSqlBlock');
+  const etl = document.getElementById('jpEtlBlock');
+
+  cmd.style.display = (t === 'shell' || t === 'python') ? 'block' : 'none';
+  sql.style.display = (t === 'sql') ? 'block' : 'none';
+  etl.style.display = (t === 'etl_template') ? 'block' : 'none';
+  if (t === 'sql') {
+    // sql needs the command box too (renamed)
+    cmd.style.display = 'block';
+    document.getElementById('jpCmdLabel').textContent = 'SQL Query *';
+    document.getElementById('jpCmdHelp').innerHTML = 'Token <code>%%ODATE%%</code> e <code>$ODATE</code> são substituídos pela business date.';
+  } else if (t === 'python') {
+    document.getElementById('jpCmdLabel').textContent = 'Python script path / args *';
+    document.getElementById('jpCmdHelp').innerHTML = 'Ex: <code>/app/my_job.py --date $ODATE</code>. Para código inline, prefixe com <code>inline:</code>.';
+  } else if (t === 'shell') {
+    document.getElementById('jpCmdLabel').textContent = 'Command *';
+    document.getElementById('jpCmdHelp').innerHTML = 'Runs <code>bash -c &lt;command&gt;</code>. Env vars: <code>ODATE</code>, <code>BUSINESS_DATE</code>, <code>DD_ENV</code>.';
+  }
+}
+
+function jpRenderDeps(checkedDeps) {
+  const list = document.getElementById('jpDepsList');
+  const editing = jpEditing;
+  const others = JOB_DEFS.filter(j => j.id !== editing);
+  if (!others.length) {
+    list.innerHTML = '<div style="color:var(--text-dim);font-size:11px">No jobs available.</div>';
+    return;
+  }
+  list.innerHTML = others.map(j => `
+    <label class="jp-dep-row">
+      <input type="checkbox" value="${j.id}" ${checkedDeps.includes(j.id) ? 'checked' : ''}/>
+      <span class="step-status-icon ${statusIconClass((jobs[j.id]||{}).status)}" style="width:14px;height:14px;font-size:8px">${statusIconChar((jobs[j.id]||{}).status)}</span>
+      <span class="dep-name">${j.label}</span>
+      <span class="dep-folder">${CATALOG[j.id]?.folder || ''} · ${j.builtin ? 'built-in' : 'custom'}</span>
+    </label>
+  `).join('');
+}
+
+function jpCollectDeps() {
+  return Array.from(document.querySelectorAll('#jpDepsList input[type="checkbox"]:checked')).map(i => i.value);
+}
+
+function jpShowError(msg) {
+  document.getElementById('jpError').textContent = msg;
+}
+function jpClearError() {
+  document.getElementById('jpError').textContent = '';
+}
+
+function saveJobModal() {
+  jpClearError();
+  const id = document.getElementById('jpName').value.trim();
+  if (!id) { jpShowError('Job Name é obrigatório'); jpSwitchTab('general'); return; }
+
+  const t = document.getElementById('jpType').value;
+  const payload = {
+    id,
+    label: id,
+    folder: document.getElementById('jpFolder').value.trim() || 'CUSTOM',
+    application: document.getElementById('jpApplication').value.trim() || 'Custom',
+    description: document.getElementById('jpDescription').value.trim(),
+    type: t,
+    command: (t === 'sql' || t === 'shell' || t === 'python') ? document.getElementById('jpCommand').value : '',
+    working_dir: document.getElementById('jpWorkdir').value.trim() || '/app',
+    depends_on: jpCollectDeps(),
+    sla_seconds: parseInt(document.getElementById('jpSla').value) || 300,
+    retries: parseInt(document.getElementById('jpRetries').value) || 0,
+  };
+
+  if (t === 'sql') {
+    payload.target_db = document.getElementById('jpTargetDb').value;
+    const chk = document.getElementById('jpExpectedCheck').value;
+    if (chk) payload.expected = { check: chk, value: document.getElementById('jpExpectedValue').value };
+  }
+  if (t === 'etl_template') {
+    payload.src_table = document.getElementById('jpSrcTable').value.trim();
+    payload.tgt_table = document.getElementById('jpTgtTable').value.trim();
+  }
+
+  const url = jpEditing ? `/api/catalog/${encodeURIComponent(jpEditing)}` : '/api/catalog';
+  const method = jpEditing ? 'PUT' : 'POST';
+  document.getElementById('jpSaveBtn').disabled = true;
+
+  fetch(url, {
+    method,
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload),
   })
-  .catch(err => log('error', `[CTM] Falha ao disparar: ${err}`));
+  .then(r => r.json().then(d => [r.status, d]))
+  .then(([status, d]) => {
+    document.getElementById('jpSaveBtn').disabled = false;
+    if (status >= 300) {
+      jpShowError(d.error || `HTTP ${status}`);
+      return;
+    }
+    log('success', `[CTM] Job ${jpEditing ? 'updated' : 'created'}: ${id}`);
+    closeJobModal();
+    loadCatalog(true);
+  })
+  .catch(err => {
+    document.getElementById('jpSaveBtn').disabled = false;
+    jpShowError(`Network error: ${err}`);
+  });
 }
 
-/* ────────────────────────────────────────────────────────── */
-/*  ADD STEP                                                   */
-/* ────────────────────────────────────────────────────────── */
-
-function openAddStep() {
-  const form = document.getElementById('addStepForm');
-  form.classList.toggle('visible');
-}
-function cancelAddStep() {
-  document.getElementById('addStepForm').classList.remove('visible');
-}
-function confirmAddStep() {
-  const name = document.getElementById('newStepName').value.trim();
-  if (!name) { alert('Nome obrigatório'); return; }
-  const desc = document.getElementById('newStepDesc').value.trim() || 'Custom step';
-  const sla  = parseInt(document.getElementById('newStepSla').value) || 300;
-  const dep  = document.getElementById('newStepDep').value || null;
-
-  JOB_DEFS.push({ id: name, label: name, dep, sla, desc });
-  jobs[name] = { status:'WAITING', start:null, end:null, retries:0, sla_miss:false, fault:null, result:null };
-
-  cancelAddStep();
-  renderStepList();
-  renderMonitorTable();
-  log('info', `[CTM] Step adicionado: ${name}`);
+function deleteJob(jobId) {
+  if (!confirm(`Delete job "${jobId}"?\n\nThis is irreversible.`)) return;
+  fetch(`/api/catalog/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+    .then(r => r.json().then(d => [r.status, d]))
+    .then(([status, d]) => {
+      if (status >= 300) {
+        log('error', `[CTM] Delete falhou: ${d.error || status}`);
+        return;
+      }
+      log('success', `[CTM] Job removido: ${jobId}`);
+      if (selectedJob === jobId) closeEditPanel();
+      delete jobs[jobId];
+      loadCatalog(true);
+    })
+    .catch(err => log('error', `[CTM] Delete falhou: ${err}`));
 }
 
-function openModal() { document.getElementById('addStepModal').classList.add('visible'); }
-function closeModal() { document.getElementById('addStepModal').classList.remove('visible'); }
-function confirmModalStep() {
-  const name = document.getElementById('modalStepName').value.trim();
-  if (!name) { alert('Nome obrigatório'); return; }
-  JOB_DEFS.push({ id: name, label: name, dep: null, sla: parseInt(document.getElementById('modalStepSla').value)||300, desc: document.getElementById('modalStepCmd').value });
-  jobs[name] = { status:'WAITING', start:null, end:null, retries:0, sla_miss:false, fault:null, result:null };
-  closeModal();
-  renderStepList();
-  renderMonitorTable();
-  log('info', `[CTM] Step adicionado: ${name}`);
-}
-
-/* ────────────────────────────────────────────────────────── */
-/*  PIPELINE RUN                                               */
-/* ────────────────────────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════════
+   PIPELINE RUN
+   ════════════════════════════════════════════════════════════════ */
 
 function startPipeline() {
-  const bd    = document.getElementById('businessDate').value;
+  const bd = document.getElementById('businessDate').value;
   const fault = document.getElementById('faultType').value;
-  if (!bd) { alert('Selecione a data de negócio.'); return; }
+  if (!bd) { alert('Select business date.'); return; }
 
   pipelineRunning = true;
   initJobs();
+  pipelineStart = Date.now();
+  startRuntimeTicker();
+
   document.getElementById('btnStart').disabled = true;
   document.getElementById('dqPanel').classList.remove('visible');
   document.getElementById('filesPanel').classList.remove('visible');
-  setBadge('run', 'Running...');
-  document.getElementById('toolbarStatus').textContent = `Pipeline ordenada — ${bd}`;
+  setBadge('run', 'Running');
 
   fetch('/api/run', {
     method:'POST',
@@ -897,10 +1850,23 @@ function startPipeline() {
   .catch(err => { alert('Erro: '+err); resetUI(); });
 }
 
+function startRuntimeTicker() {
+  if (runtimeTicker) clearInterval(runtimeTicker);
+  runtimeTicker = setInterval(() => {
+    if (!pipelineStart) return;
+    const sec = Math.floor((Date.now() - pipelineStart) / 1000);
+    document.getElementById('subRuntime').textContent = `${sec}s`;
+  }, 1000);
+}
+function stopRuntimeTicker() {
+  if (runtimeTicker) { clearInterval(runtimeTicker); runtimeTicker = null; }
+}
+
 function resetUI() {
   document.getElementById('btnStart').disabled = false;
   setBadge('idle', 'Idle');
   pipelineRunning = false;
+  stopRuntimeTicker();
 }
 
 function resetJobs() {
@@ -908,17 +1874,19 @@ function resetJobs() {
   document.getElementById('dqPanel').classList.remove('visible');
   document.getElementById('filesPanel').classList.remove('visible');
   setBadge('idle', 'Idle');
-  document.getElementById('toolbarStatus').textContent = 'Aguardando ordem...';
+  document.getElementById('subRuntime').textContent = '—';
+  stopRuntimeTicker();
+  pipelineStart = null;
+  if (cy) initNetwork();
 }
 
-/* ────────────────────────────────────────────────────────── */
-/*  SSE                                                        */
-/* ────────────────────────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════════
+   SSE
+   ════════════════════════════════════════════════════════════════ */
 
 function connectSSE() {
   if (eventSource) eventSource.close();
   eventSource = new EventSource('/api/stream');
-
   eventSource.onmessage = (e) => {
     const data = JSON.parse(e.data);
     handleSSE(data);
@@ -929,7 +1897,6 @@ function connectSSE() {
 function handleSSE(data) {
   appendLog(data);
 
-  // Job-level updates from SSE
   if (data.type === 'job-start' && data.job) {
     updateJobStatus(data.job, 'RUNNING', data.timestamp, null, 0, false);
   }
@@ -938,21 +1905,22 @@ function handleSSE(data) {
     updateJobStatus(data.job, ok ? 'ENDED OK' : 'ENDED NOT OK', null, data.timestamp, data.retries||0, data.sla_miss||false, data.duration_seconds, data.result);
   }
 
-  // Pipeline-level
   if (data.type === 'pipeline-complete') {
     setBadge('ok', 'Ended OK');
     document.getElementById('btnStart').disabled = false;
-    document.getElementById('toolbarStatus').textContent = `Pipeline concluída — ${data.result?.duration_seconds||'?'}s`;
     pipelineRunning = false;
+    stopRuntimeTicker();
     applyPipelineResult(data.result, true);
   }
   if (data.type === 'pipeline-failed') {
     setBadge('fail', 'Failed');
     document.getElementById('btnStart').disabled = false;
-    document.getElementById('toolbarStatus').textContent = `Pipeline FALHOU`;
     pipelineRunning = false;
+    stopRuntimeTicker();
     applyPipelineResult(data.result, false);
   }
+
+  document.getElementById('sbLast').textContent = data.timestamp || '—';
 }
 
 function updateJobStatus(jobId, status, start, end, retries, sla_miss, duration, result) {
@@ -967,11 +1935,14 @@ function updateJobStatus(jobId, status, start, end, retries, sla_miss, duration,
 
   renderStepList();
   renderMonitorTable();
+  refreshNetwork();
+  updateCounts();
+
+  if (selectedJob === jobId) selectJob(jobId);
 }
 
 function applyPipelineResult(result, success) {
   if (!result || !result.jobs) return;
-
   for (const [name, job] of Object.entries(result.jobs)) {
     updateJobStatus(
       name,
@@ -983,19 +1954,15 @@ function applyPipelineResult(result, success) {
       job.result
     );
   }
-
-  // Quality gate
   const qg = result.jobs?.quality_gate_d1?.result;
   if (qg) showDQPanel(qg);
-
-  // Files
   const pub = result.jobs?.publish_d1_reports?.result;
   if (pub?.files_exported?.length) showFilesPanel(pub.files_exported);
 }
 
-/* ────────────────────────────────────────────────────────── */
-/*  DQ PANEL                                                   */
-/* ────────────────────────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════════
+   DQ & FILES
+   ════════════════════════════════════════════════════════════════ */
 
 function showDQPanel(qg) {
   const panel = document.getElementById('dqPanel');
@@ -1023,10 +1990,6 @@ function showDQPanel(qg) {
   `;
 }
 
-/* ────────────────────────────────────────────────────────── */
-/*  FILES PANEL                                                */
-/* ────────────────────────────────────────────────────────── */
-
 function showFilesPanel(files) {
   const panel = document.getElementById('filesPanel');
   const list  = document.getElementById('filesList');
@@ -1037,13 +2000,14 @@ function showFilesPanel(files) {
   }).join(' ');
 }
 
-/* ────────────────────────────────────────────────────────── */
-/*  CONSOLE                                                    */
-/* ────────────────────────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════════
+   CONSOLE (sysout) — filterable
+   ════════════════════════════════════════════════════════════════ */
 
 function appendLog(data) {
   const line = document.createElement('div');
   line.className = 'log-line';
+  line.dataset.text = (data.text || '').toLowerCase();
 
   const cls = {
     'connected':         'log-info',
@@ -1056,7 +2020,11 @@ function appendLog(data) {
     'pipeline-failed':   'log-pipe-fail',
   }[data.type] || 'log-info';
 
-  line.innerHTML = `<span class="log-ts">${data.timestamp}</span> <span class="${cls}">${escHtml(data.text)}</span>`;
+  line.innerHTML = `<span class="log-ts">${data.timestamp || ''}</span><span class="${cls}">${escHtml(data.text)}</span>`;
+
+  const f = document.getElementById('consoleFilter').value.toLowerCase();
+  if (f && !line.dataset.text.includes(f)) line.classList.add('hidden');
+
   const con = document.getElementById('console');
   con.appendChild(line);
   con.scrollTop = con.scrollHeight;
@@ -1074,9 +2042,38 @@ function clearConsole() {
   document.getElementById('lineCount').textContent = '0 lines';
 }
 
-/* ────────────────────────────────────────────────────────── */
-/*  HELPERS                                                    */
-/* ────────────────────────────────────────────────────────── */
+function filterConsole() {
+  const f = document.getElementById('consoleFilter').value.toLowerCase();
+  document.querySelectorAll('#console .log-line').forEach(l => {
+    if (!f || l.dataset.text.includes(f)) l.classList.remove('hidden');
+    else l.classList.add('hidden');
+  });
+}
+
+/* ════════════════════════════════════════════════════════════════
+   STATUS BAR COUNTS
+   ════════════════════════════════════════════════════════════════ */
+
+function updateCounts() {
+  let ok=0, exec=0, wait=0, fail=0, held=0;
+  Object.values(jobs).forEach(j => {
+    if (j.status === 'ENDED OK') ok++;
+    else if (j.status === 'RUNNING') exec++;
+    else if (j.status === 'ENDED NOT OK') fail++;
+    else if (j.status === 'HELD') held++;
+    else wait++;
+  });
+  document.getElementById('sbOk').textContent   = ok;
+  document.getElementById('sbExec').textContent = exec;
+  document.getElementById('sbWait').textContent = wait;
+  document.getElementById('sbFail').textContent = fail + (held ? ` (${held} held)` : '');
+
+  document.getElementById('viewMiniInfo').textContent = `${JOB_DEFS.length} jobs · ${exec} executing · ${ok} completed${fail ? ' · '+fail+' failed' : ''}`;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   HELPERS
+   ════════════════════════════════════════════════════════════════ */
 
 function setBadge(type, text) {
   const el = document.getElementById('pipelineBadge');
@@ -1095,6 +2092,74 @@ function escHtml(text) {
   el.textContent = text;
   return el.innerHTML;
 }
+
+// ── History modal ─────────────────────────────────────────────────────────
+async function openHistory() {
+  const overlay = document.getElementById('history-overlay');
+  overlay.style.display = 'flex';
+  await refreshHistory();
+}
+
+async function refreshHistory() {
+  const tbody = document.getElementById('history-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:24px;">Loading…</td></tr>';
+  try {
+    const resp = await fetch('/api/runs?limit=100');
+    const data = await resp.json();
+    if (!data.runs || data.runs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:24px;">Sem runs ainda — rode um pipeline.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.runs.map(r => {
+      const ts = (r.finished_at || '').replace('T', ' ').substring(0, 19);
+      const statusColor = r.status === 'success' ? '#10b981' : '#ef4444';
+      return `<tr>
+        <td style="font-family:monospace;font-size:11px;">${escHtml((r.run_id||'').substring(0,8))}…</td>
+        <td>${escHtml(r.pipeline||'')}</td>
+        <td>${escHtml(r.business_date||'')}</td>
+        <td><span style="color:${statusColor};font-weight:600;">${escHtml((r.status||'').toUpperCase())}</span></td>
+        <td>${r.duration_seconds || 0}s</td>
+        <td>${r.job_count || 0}</td>
+        <td style="font-size:11px;color:#94a3b8;">${escHtml(ts)} UTC</td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" style="color:#ef4444;padding:12px;">Erro: ${escHtml(err.message)}</td></tr>`;
+  }
+}
+
+function closeHistory() {
+  document.getElementById('history-overlay').style.display = 'none';
+}
 </script>
+
+<!-- History modal -->
+<div id="history-overlay" style="display:none;position:fixed;inset:0;background:rgba(8,12,24,0.78);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#0f172a;border:1px solid #334155;border-radius:8px;width:min(95vw,1100px);max-height:88vh;overflow:auto;padding:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h2 style="margin:0;color:#e2e8f0;font-size:18px;">📜 Pipeline Run History</h2>
+      <button onclick="closeHistory()" style="background:#334155;color:#e2e8f0;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;">✕ Close</button>
+    </div>
+
+    <!-- Run history -->
+    <h3 style="margin:0 0 8px 0;color:#e2e8f0;font-size:14px;">📋 Run History</h3>
+    <table style="width:100%;border-collapse:collapse;color:#e2e8f0;font-size:13px;">
+      <thead>
+        <tr style="border-bottom:2px solid #334155;text-align:left;">
+          <th style="padding:8px;">Run ID</th>
+          <th style="padding:8px;">Pipeline</th>
+          <th style="padding:8px;">Business Date</th>
+          <th style="padding:8px;">Status</th>
+          <th style="padding:8px;">Duration</th>
+          <th style="padding:8px;">Jobs</th>
+          <th style="padding:8px;">Finished</th>
+        </tr>
+      </thead>
+      <tbody id="history-tbody"></tbody>
+    </table>
+    <p style="color:#64748b;font-size:11px;margin-top:14px;">Fonte: <code>/data/runs.jsonl</code> · Persiste a cada <code>execute_pipeline()</code>. Últimos 100 runs.</p>
+  </div>
+</div>
+
 </body>
 </html>

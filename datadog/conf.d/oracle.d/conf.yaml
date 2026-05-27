@@ -9,7 +9,14 @@ instances:
     reported_hostname: demo-oracle
     query_metrics:
       enabled: true
+    # Activity sampling disabled due to a known agent issue with Oracle XE 21c:
+    # NULL OP_FLAGS in V$SESSION rows triggers "converting NULL to uint64"
+    # scan errors that abort the check. query_metrics + execution_plans still
+    # give top queries, exec stats, wait events, and explain plans — which is
+    # 90% of what DBM provides. Re-enable when fixed upstream.
     query_samples:
+      enabled: false
+    execution_plans:
       enabled: true
 
     custom_queries:

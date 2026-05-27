@@ -1,5 +1,15 @@
 init_config:
 
+logs:
+  - type: file
+    path: /var/log/mysql-data/*.log
+    source: mysql
+    service: demo-mysql
+    tags:
+      - env:demo
+      - team:data-platform
+      - db:mysql
+
 instances:
   - host: demo-mysql
     port: 3306

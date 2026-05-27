@@ -22,11 +22,97 @@ import os
 import random
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
+
+from ddtrace import tracer
 
 logger = logging.getLogger("controlm-sim.etl")
 
 # ── Database connection helpers ───────────────────────────────────────────────
+
+
+def _compact_sql(sql):
+    return " ".join(str(sql).split())[:500]
+
+
+@contextmanager
+def _client_span(name, service, resource, span_type="custom", **tags):
+    with tracer.trace(name, service=service, resource=resource, span_type=span_type) as span:
+        span.set_tag("span.kind", "client")
+        span.set_tag("env", os.environ.get("DD_ENV", "demo"))
+        span.set_tag("team", "data-platform")
+        span.set_tag("domain", "capital-markets")
+        for key, value in tags.items():
+            if value is not None:
+                span.set_tag(key, value)
+        yield span
+
+
+def _db_service(system):
+    return "demo-oracle" if system == "oracle" else "demo-sqlserver"
+
+
+def _db_name(system):
+    if system == "oracle":
+        return os.environ.get("ORACLE_SERVICE", "XEPDB1")
+    return os.environ.get("SQLSERVER_DATABASE", "demopoc")
+
+
+@contextmanager
+def _db_span(system, operation, table, statement=None, rows=None):
+    service = _db_service(system)
+    resource = f"{operation} {table}"
+    with _client_span(
+        f"{system}.query",
+        service=service,
+        resource=resource,
+        span_type="sql",
+        component=system,
+        **{
+            "db.system": system,
+            "db.name": _db_name(system),
+            "db.operation": operation,
+            "db.table": table,
+            "db.statement": _compact_sql(statement) if statement else None,
+            "db.rows": rows,
+            "peer.service": service,
+        },
+    ) as span:
+        yield span
+
+
+def _db_execute(cursor, system, operation, table, statement, params=None):
+    with _db_span(system, operation, table, statement) as span:
+        if params is None:
+            cursor.execute(statement)
+        else:
+            cursor.execute(statement, params)
+        rowcount = getattr(cursor, "rowcount", None)
+        if rowcount not in (None, -1):
+            span.set_tag("db.rows_affected", rowcount)
+
+
+def _db_fetchall(cursor, system, operation, table, statement, params=None):
+    with _db_span(system, operation, table, statement) as span:
+        if params is None:
+            cursor.execute(statement)
+        else:
+            cursor.execute(statement, params)
+        rows = cursor.fetchall()
+        span.set_tag("db.rows_returned", len(rows))
+        return rows
+
+
+def _db_fetchone(cursor, system, operation, table, statement, params=None):
+    with _db_span(system, operation, table, statement) as span:
+        if params is None:
+            cursor.execute(statement)
+        else:
+            cursor.execute(statement, params)
+        row = cursor.fetchone()
+        span.set_tag("db.rows_returned", 1 if row is not None else 0)
+        return row
 
 
 def _get_oracle_connection():
@@ -37,23 +123,49 @@ def _get_oracle_connection():
         int(os.environ.get("ORACLE_PORT", "1521")),
         service_name=os.environ.get("ORACLE_SERVICE", "XEPDB1"),
     )
-    return oracledb.connect(
-        user=os.environ.get("ORACLE_USER", "demopoc"),
-        password=os.environ.get("ORACLE_PASSWORD", "OracleDemo123!"),
-        dsn=dsn,
-    )
+    with _client_span(
+        "oracle.connect",
+        service="demo-oracle",
+        resource=os.environ.get("ORACLE_SERVICE", "XEPDB1"),
+        span_type="sql",
+        component="oracle",
+        **{
+            "db.system": "oracle",
+            "db.name": os.environ.get("ORACLE_SERVICE", "XEPDB1"),
+            "network.destination.name": os.environ.get("ORACLE_HOST", "oracle"),
+            "peer.service": "demo-oracle",
+        },
+    ):
+        return oracledb.connect(
+            user=os.environ.get("ORACLE_USER", "demopoc"),
+            password=os.environ.get("ORACLE_PASSWORD", "OracleDemo123!"),
+            dsn=dsn,
+        )
 
 
 def _get_sqlserver_connection():
     """Connect to SQL Server destination DW."""
     import pymssql
-    return pymssql.connect(
-        server=os.environ.get("SQLSERVER_HOST", "sqlserver"),
-        port=int(os.environ.get("SQLSERVER_PORT", "1433")),
-        user=os.environ.get("SQLSERVER_USER", "sa"),
-        password=os.environ.get("SQLSERVER_PASSWORD", "SqlDemo12345!"),
-        database=os.environ.get("SQLSERVER_DATABASE", "demopoc"),
-    )
+    with _client_span(
+        "sqlserver.connect",
+        service="demo-sqlserver",
+        resource=os.environ.get("SQLSERVER_DATABASE", "demopoc"),
+        span_type="sql",
+        component="sqlserver",
+        **{
+            "db.system": "sqlserver",
+            "db.name": os.environ.get("SQLSERVER_DATABASE", "demopoc"),
+            "network.destination.name": os.environ.get("SQLSERVER_HOST", "sqlserver"),
+            "peer.service": "demo-sqlserver",
+        },
+    ):
+        return pymssql.connect(
+            server=os.environ.get("SQLSERVER_HOST", "sqlserver"),
+            port=int(os.environ.get("SQLSERVER_PORT", "1433")),
+            user=os.environ.get("SQLSERVER_USER", "sa"),
+            password=os.environ.get("SQLSERVER_PASSWORD", "SqlDemo12345!"),
+            database=os.environ.get("SQLSERVER_DATABASE", "demopoc"),
+        )
 
 
 def _row_hash(*values):
@@ -85,8 +197,9 @@ def seed_oracle_data(business_date, inject_fault=None):
 
     try:
         # Clean existing data for this date
-        for table in ["ASTADRVT_TRADE_MVMT", "ASTANO_FGBE_DRVT_PSTN", "ASTACASH_MRKT_PSTN"]:
-            cursor.execute(f"DELETE FROM {table} WHERE BUSINESS_DATE = TO_DATE(:bd, 'YYYY-MM-DD')", {"bd": business_date})
+        with _db_span("oracle", "DELETE", "ASTA_MARKET_DATA", rows=3):
+            for table in ["ASTADRVT_TRADE_MVMT", "ASTANO_FGBE_DRVT_PSTN", "ASTACASH_MRKT_PSTN"]:
+                cursor.execute(f"DELETE FROM {table} WHERE BUSINESS_DATE = TO_DATE(:bd, 'YYYY-MM-DD')", {"bd": business_date})
 
         # ── 1. ASTADRVT_TRADE_MVMT (500 trades) ──────────────────────────────
         trade_sql = """INSERT INTO ASTADRVT_TRADE_MVMT
@@ -96,17 +209,19 @@ def seed_oracle_data(business_date, inject_fault=None):
                            :qty, :price, :gross, TO_DATE(:bd,'YYYY-MM-DD')+2, 'OPEN', TO_DATE(:bd,'YYYY-MM-DD'))"""
 
         trade_ids = []
-        for i in range(500):
-            trade_id = f"TRD-{business_date.replace('-', '')}-{str(i+1).zfill(5)}"
-            trade_ids.append(trade_id)
-            ticker = random.choice(tickers)
-            qty = random.randint(100, 10000)
-            price = round(random.uniform(10.0, 500.0), 2)
-            cursor.execute(trade_sql, {
-                "tid": trade_id, "bd": business_date, "ticker": ticker,
-                "buyer": random.choice(participants), "seller": random.choice(participants),
-                "qty": qty, "price": price, "gross": round(qty * price, 2),
-            })
+        with _db_span("oracle", "INSERT", "ASTADRVT_TRADE_MVMT", trade_sql, rows=500) as span:
+            for i in range(500):
+                trade_id = f"TRD-{business_date.replace('-', '')}-{str(i+1).zfill(5)}"
+                trade_ids.append(trade_id)
+                ticker = random.choice(tickers)
+                qty = random.randint(100, 10000)
+                price = round(random.uniform(10.0, 500.0), 2)
+                cursor.execute(trade_sql, {
+                    "tid": trade_id, "bd": business_date, "ticker": ticker,
+                    "buyer": random.choice(participants), "seller": random.choice(participants),
+                    "qty": qty, "price": price, "gross": round(qty * price, 2),
+                })
+            span.set_tag("db.rows_inserted", 500)
 
         # Caso 1: Inject 4 duplicate trade_ids (different PK → disable PK first, or use different approach)
         if inject_fault in ("duplicate_trades", "all"):
@@ -133,22 +248,24 @@ def seed_oracle_data(business_date, inject_fault=None):
                    VALUES (:pid, TO_DATE(:bd,'YYYY-MM-DD'), :part, :instr,
                            :net_qty, :long_qty, :short_qty, :mktval, TO_DATE(:bd,'YYYY-MM-DD'))"""
 
-        for i in range(50):
-            pos_id = f"POS-DRVT-{business_date.replace('-', '')}-{str(i+1).zfill(4)}"
-            long_qty = random.randint(0, 1000)
-            short_qty = random.randint(0, 500)
-            settlement_price = round(random.uniform(10.0, 500.0), 6)
+        with _db_span("oracle", "INSERT", "ASTANO_FGBE_DRVT_PSTN", pos_sql, rows=50) as span:
+            for i in range(50):
+                pos_id = f"POS-DRVT-{business_date.replace('-', '')}-{str(i+1).zfill(4)}"
+                long_qty = random.randint(0, 1000)
+                short_qty = random.randint(0, 500)
+                settlement_price = round(random.uniform(10.0, 500.0), 6)
 
-            # Caso 2: Null settlement_price for some rows
-            if inject_fault in ("null_settlement_price", "all") and i < 8:
-                settlement_price = None
+                # Caso 2: Null settlement_price for some rows
+                if inject_fault in ("null_settlement_price", "all") and i < 8:
+                    settlement_price = None
 
-            cursor.execute(pos_sql, {
-                "pid": pos_id, "bd": business_date,
-                "part": random.choice(participants), "instr": random.choice(tickers),
-                "net_qty": long_qty - short_qty, "long_qty": long_qty,
-                "short_qty": short_qty, "mktval": settlement_price,
-            })
+                cursor.execute(pos_sql, {
+                    "pid": pos_id, "bd": business_date,
+                    "part": random.choice(participants), "instr": random.choice(tickers),
+                    "net_qty": long_qty - short_qty, "long_qty": long_qty,
+                    "short_qty": short_qty, "mktval": settlement_price,
+                })
+            span.set_tag("db.rows_inserted", 50)
 
         if inject_fault in ("null_settlement_price", "all"):
             logger.warning("[FAULT] Injected 8 rows with NULL settlement_price in ASTANO_FGBE_DRVT_PSTN")
@@ -160,26 +277,29 @@ def seed_oracle_data(business_date, inject_fault=None):
                    VALUES (:pid, TO_DATE(:bd,'YYYY-MM-DD'), :part, :instr,
                            :net_qty, :sval, TO_DATE(:bd,'YYYY-MM-DD'))"""
 
-        for i in range(40):
-            pos_id = f"POS-CASH-{business_date.replace('-', '')}-{str(i+1).zfill(4)}"
-            long_val = round(random.uniform(10000.0, 5000000.0), 4)
-            short_val = round(random.uniform(-5000000.0, -10000.0), 4)
+        with _db_span("oracle", "INSERT", "ASTACASH_MRKT_PSTN", cash_sql, rows=40) as span:
+            for i in range(40):
+                pos_id = f"POS-CASH-{business_date.replace('-', '')}-{str(i+1).zfill(4)}"
+                long_val = round(random.uniform(10000.0, 5000000.0), 4)
+                short_val = round(random.uniform(-5000000.0, -10000.0), 4)
 
-            # Caso 3: Zero-sum positions (long_value + short_value = 0)
-            if inject_fault in ("zero_sum_positions", "all") and i < 6:
-                short_val = -long_val  # Exact zero sum
+                # Caso 3: Zero-sum positions (long_value + short_value = 0)
+                if inject_fault in ("zero_sum_positions", "all") and i < 6:
+                    short_val = -long_val  # Exact zero sum
 
-            net_val = round(long_val + short_val, 4)
-            cursor.execute(cash_sql, {
-                "pid": pos_id, "bd": business_date,
-                "part": random.choice(participants), "instr": random.choice(tickers),
-                "net_qty": random.randint(100, 5000), "sval": net_val,
-            })
+                net_val = round(long_val + short_val, 4)
+                cursor.execute(cash_sql, {
+                    "pid": pos_id, "bd": business_date,
+                    "part": random.choice(participants), "instr": random.choice(tickers),
+                    "net_qty": random.randint(100, 5000), "sval": net_val,
+                })
+            span.set_tag("db.rows_inserted", 40)
 
         if inject_fault in ("zero_sum_positions", "all"):
             logger.warning("[FAULT] Injected 6 zero-sum positions in ASTACASH_MRKT_PSTN")
 
-        conn.commit()
+        with _db_span("oracle", "COMMIT", "ASTA_MARKET_DATA"):
+            conn.commit()
         logger.info("Seeded Oracle data for %s (fault=%s)", business_date, inject_fault)
 
         return {
@@ -217,24 +337,32 @@ def run_close_market_eod(business_date):
 
     try:
         ora_cursor = ora_conn.cursor()
-        ora_cursor.execute(
+        trade_rows = _db_fetchall(
+            ora_cursor,
+            "oracle",
+            "SELECT",
+            "ASTADRVT_TRADE_MVMT",
             """SELECT TRADE_ID, INSTRUMENT_CODE, CLOSING_PRICE * QUANTITY, QUANTITY,
                       TRADE_DT, SETTLEMENT_DT, BUY_PARTICIPANT, SELL_PARTICIPANT,
                       SUBSTR(INSTRUMENT_CODE, 1, 5), STATUS
                FROM ASTADRVT_TRADE_MVMT
                WHERE BUSINESS_DATE = TO_DATE(:bd, 'YYYY-MM-DD')""",
-            {"bd": business_date}
+            {"bd": business_date},
         )
 
         sql_cursor = sql_conn.cursor()
         # Clear existing data for this date to allow re-runs
-        sql_cursor.execute(
+        _db_execute(
+            sql_cursor,
+            "sqlserver",
+            "DELETE",
+            "ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO",
             "DELETE FROM dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO WHERE trade_dt = %s",
-            (business_date,)
+            (business_date,),
         )
 
         batch = []
-        for row in ora_cursor:
+        for row in trade_rows:
             trade_id, ticker, notional, qty, trade_dt, settle_dt, cpty, trader, desk, status = row
             row_hash = _row_hash(trade_id, business_date)
             batch.append((
@@ -245,17 +373,18 @@ def run_close_market_eod(business_date):
                 "oracle", row_hash,
             ))
 
-        for rec in batch:
-            sql_cursor.execute(
-                """INSERT INTO dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO
+        insert_sql = """INSERT INTO dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO
                    (trade_id, ticker, notional, quantity, trade_dt, settlement_dt,
                     counterparty_id, trader_id, desk_code, status, dw_source, dw_row_hash)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                rec
-            )
-            rows_loaded += 1
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+        with _db_span("sqlserver", "INSERT", "ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO", insert_sql, rows=len(batch)) as span:
+            for rec in batch:
+                sql_cursor.execute(insert_sql, rec)
+                rows_loaded += 1
+            span.set_tag("db.rows_inserted", rows_loaded)
 
-        sql_conn.commit()
+        with _db_span("sqlserver", "COMMIT", "ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO"):
+            sql_conn.commit()
         logger.info("close_market_eod: loaded %d rows Oracle→SQL Server", rows_loaded)
 
         return {"status": "success", "rows_loaded": rows_loaded}
@@ -283,74 +412,109 @@ def run_reconcile_d1_positions(business_date):
         sql_cursor = sql_conn.cursor()
 
         # ── Part A: ASTANO_FGBE_DRVT_PSTN → ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL ──
-        sql_cursor.execute(
+        _db_execute(
+            sql_cursor,
+            "sqlserver",
+            "DELETE",
+            "ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL",
             "DELETE FROM dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL WHERE position_date = %s",
-            (business_date,)
+            (business_date,),
         )
 
-        ora_cursor.execute(
+        derivative_rows = _db_fetchall(
+            ora_cursor,
+            "oracle",
+            "SELECT",
+            "ASTANO_FGBE_DRVT_PSTN",
             """SELECT POSITION_ID, INSTRUMENT_CODE, PARTICIPANT_CODE, POSITION_DATE,
                       LONG_QUANTITY, SHORT_QUANTITY, NET_QUANTITY, MARKET_VALUE, MARKET_VALUE
                FROM ASTANO_FGBE_DRVT_PSTN
                WHERE BUSINESS_DATE = TO_DATE(:bd, 'YYYY-MM-DD')""",
-            {"bd": business_date}
+            {"bd": business_date},
         )
 
-        for row in ora_cursor:
-            pos_id, instr, part, pos_dt, long_q, short_q, net_q, settle_price, margin = row
-            row_hash = _row_hash(pos_id, business_date)
-            sql_cursor.execute(
-                """INSERT INTO dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL
+        derivative_insert_sql = """INSERT INTO dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL
                    (position_id, instrument_id, participant_code, position_date,
                     long_qty, short_qty, net_qty, settlement_price, margin_value,
                     dw_source, dw_row_hash)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                (str(pos_id), str(instr), str(part), business_date,
-                 float(long_q or 0), float(short_q or 0), float(net_q or 0),
-                 float(settle_price) if settle_price is not None else None,
-                 float(margin) if margin is not None else None,
-                 "oracle", row_hash)
-            )
-            drvt_loaded += 1
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+        with _db_span(
+            "sqlserver",
+            "INSERT",
+            "ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL",
+            derivative_insert_sql,
+            rows=len(derivative_rows),
+        ) as span:
+            for row in derivative_rows:
+                pos_id, instr, part, pos_dt, long_q, short_q, net_q, settle_price, margin = row
+                row_hash = _row_hash(pos_id, business_date)
+                sql_cursor.execute(
+                    derivative_insert_sql,
+                    (str(pos_id), str(instr), str(part), business_date,
+                     float(long_q or 0), float(short_q or 0), float(net_q or 0),
+                     float(settle_price) if settle_price is not None else None,
+                     float(margin) if margin is not None else None,
+                     "oracle", row_hash)
+                )
+                drvt_loaded += 1
+            span.set_tag("db.rows_inserted", drvt_loaded)
 
         # ── Part B: ASTACASH_MRKT_PSTN → ADWPM_POSICAO_MERCADO_A_VISTA ──────
-        sql_cursor.execute(
+        _db_execute(
+            sql_cursor,
+            "sqlserver",
+            "DELETE",
+            "ADWPM_POSICAO_MERCADO_A_VISTA",
             "DELETE FROM dbo.ADWPM_POSICAO_MERCADO_A_VISTA WHERE position_date = %s",
-            (business_date,)
+            (business_date,),
         )
 
-        ora_cursor.execute(
+        cash_rows = _db_fetchall(
+            ora_cursor,
+            "oracle",
+            "SELECT",
+            "ASTACASH_MRKT_PSTN",
             """SELECT POSITION_ID, INSTRUMENT_CODE, PARTICIPANT_CODE, POSITION_DATE,
                       SETTLEMENT_VALUE, NET_QUANTITY
                FROM ASTACASH_MRKT_PSTN
                WHERE BUSINESS_DATE = TO_DATE(:bd, 'YYYY-MM-DD')""",
-            {"bd": business_date}
+            {"bd": business_date},
         )
 
-        for row in ora_cursor:
-            pos_id, ticker, part, pos_dt, settle_val, net_qty = row
-            # For cash positions, derive long/short from settlement_value sign
-            settle_val = float(settle_val or 0)
-            if settle_val >= 0:
-                long_val = settle_val
-                short_val = 0.0
-            else:
-                long_val = 0.0
-                short_val = settle_val
-            net_val = long_val + short_val
-            row_hash = _row_hash(pos_id, business_date)
-
-            sql_cursor.execute(
-                """INSERT INTO dbo.ADWPM_POSICAO_MERCADO_A_VISTA
+        cash_insert_sql = """INSERT INTO dbo.ADWPM_POSICAO_MERCADO_A_VISTA
                    (position_id, ticker, participant_code, position_date,
                     long_value, short_value, net_value, dw_source, dw_row_hash)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                (str(pos_id), str(ticker), str(part), business_date,
-                 long_val, short_val, net_val, "oracle", row_hash)
-            )
-            cash_loaded += 1
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+        with _db_span(
+            "sqlserver",
+            "INSERT",
+            "ADWPM_POSICAO_MERCADO_A_VISTA",
+            cash_insert_sql,
+            rows=len(cash_rows),
+        ) as span:
+            for row in cash_rows:
+                pos_id, ticker, part, pos_dt, settle_val, net_qty = row
+                # For cash positions, derive long/short from settlement_value sign
+                settle_val = float(settle_val or 0)
+                if settle_val >= 0:
+                    long_val = settle_val
+                    short_val = 0.0
+                else:
+                    long_val = 0.0
+                    short_val = settle_val
+                net_val = long_val + short_val
+                row_hash = _row_hash(pos_id, business_date)
 
-        sql_conn.commit()
+                sql_cursor.execute(
+                    cash_insert_sql,
+                    (str(pos_id), str(ticker), str(part), business_date,
+                     long_val, short_val, net_val, "oracle", row_hash)
+                )
+                cash_loaded += 1
+            span.set_tag("db.rows_inserted", cash_loaded)
+
+        with _db_span("sqlserver", "COMMIT", "ADWPM_POSICAO_*"):
+            sql_conn.commit()
         logger.info(
             "reconcile_d1_positions: loaded %d derivatives + %d cash positions Oracle→SQL Server",
             drvt_loaded, cash_loaded,
@@ -392,7 +556,7 @@ def run_quality_gate_d1(business_date):
         ora_cur = ora_conn.cursor()
 
         # ── Check 1: Duplicates (Caso 1) ─────────────────────────────────────
-        sql_cur.execute("""
+        dup_row = _db_fetchone(sql_cur, "sqlserver", "DQ_CHECK", "ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO", """
             SELECT COALESCE(SUM(cnt - 1), 0)
             FROM (
                 SELECT trade_id, COUNT(*) AS cnt
@@ -402,7 +566,7 @@ def run_quality_gate_d1(business_date):
                 HAVING COUNT(*) > 1
             ) dup
         """, (business_date,))
-        dup_count = sql_cur.fetchone()[0] or 0
+        dup_count = dup_row[0] or 0
         results.append({
             "check_name": "caso1_duplicate_trades",
             "check_type": "uniqueness",
@@ -415,12 +579,12 @@ def run_quality_gate_d1(business_date):
         })
 
         # ── Check 2: Null settlement_price (Caso 2) ──────────────────────────
-        sql_cur.execute("""
+        null_row = _db_fetchone(sql_cur, "sqlserver", "DQ_CHECK", "ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL", """
             SELECT COUNT(*)
             FROM dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL
             WHERE position_date = %s AND settlement_price IS NULL
         """, (business_date,))
-        null_count = sql_cur.fetchone()[0] or 0
+        null_count = null_row[0] or 0
         results.append({
             "check_name": "caso2_null_settlement_price",
             "check_type": "completeness",
@@ -433,12 +597,12 @@ def run_quality_gate_d1(business_date):
         })
 
         # ── Check 3: Zero-sum positions (Caso 3) ─────────────────────────────
-        sql_cur.execute("""
+        zero_row = _db_fetchone(sql_cur, "sqlserver", "DQ_CHECK", "ADWPM_POSICAO_MERCADO_A_VISTA", """
             SELECT COUNT(*)
             FROM dbo.ADWPM_POSICAO_MERCADO_A_VISTA
             WHERE position_date = %s AND (long_value + short_value) = 0
         """, (business_date,))
-        zero_count = sql_cur.fetchone()[0] or 0
+        zero_count = zero_row[0] or 0
         results.append({
             "check_name": "caso3_zero_sum_positions",
             "check_type": "consistency",
@@ -451,17 +615,25 @@ def run_quality_gate_d1(business_date):
         })
 
         # ── Check 4: Row count comparison — trades ────────────────────────────
-        ora_cur.execute(
+        oracle_trade_row = _db_fetchone(
+            ora_cur,
+            "oracle",
+            "ROWCOUNT",
+            "ASTADRVT_TRADE_MVMT",
             "SELECT COUNT(*) FROM ASTADRVT_TRADE_MVMT WHERE BUSINESS_DATE = TO_DATE(:bd, 'YYYY-MM-DD')",
-            {"bd": business_date}
+            {"bd": business_date},
         )
-        oracle_trade_count = ora_cur.fetchone()[0] or 0
+        oracle_trade_count = oracle_trade_row[0] or 0
 
-        sql_cur.execute(
+        dw_trade_row = _db_fetchone(
+            sql_cur,
+            "sqlserver",
+            "ROWCOUNT",
+            "ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO",
             "SELECT COUNT(*) FROM dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO WHERE trade_dt = %s",
-            (business_date,)
+            (business_date,),
         )
-        dw_trade_count = sql_cur.fetchone()[0] or 0
+        dw_trade_count = dw_trade_row[0] or 0
 
         results.append({
             "check_name": "rowcount_trades_oracle_vs_dw",
@@ -475,17 +647,25 @@ def run_quality_gate_d1(business_date):
         })
 
         # ── Check 5: Row count comparison — derivative positions ──────────────
-        ora_cur.execute(
+        oracle_pos_row = _db_fetchone(
+            ora_cur,
+            "oracle",
+            "ROWCOUNT",
+            "ASTANO_FGBE_DRVT_PSTN",
             "SELECT COUNT(*) FROM ASTANO_FGBE_DRVT_PSTN WHERE BUSINESS_DATE = TO_DATE(:bd, 'YYYY-MM-DD')",
-            {"bd": business_date}
+            {"bd": business_date},
         )
-        oracle_pos_count = ora_cur.fetchone()[0] or 0
+        oracle_pos_count = oracle_pos_row[0] or 0
 
-        sql_cur.execute(
+        dw_pos_row = _db_fetchone(
+            sql_cur,
+            "sqlserver",
+            "ROWCOUNT",
+            "ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL",
             "SELECT COUNT(*) FROM dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL WHERE position_date = %s",
-            (business_date,)
+            (business_date,),
         )
-        dw_pos_count = sql_cur.fetchone()[0] or 0
+        dw_pos_count = dw_pos_row[0] or 0
 
         results.append({
             "check_name": "rowcount_positions_oracle_vs_dw",
@@ -499,24 +679,32 @@ def run_quality_gate_d1(business_date):
         })
 
         # ── Write results to ADWPM_DQ_RESULTS ─────────────────────────────────
-        sql_cur.execute(
+        _db_execute(
+            sql_cur,
+            "sqlserver",
+            "DELETE",
+            "ADWPM_DQ_RESULTS",
             "DELETE FROM dbo.ADWPM_DQ_RESULTS WHERE business_date = %s",
-            (business_date,)
+            (business_date,),
         )
 
-        for r in results:
-            sql_cur.execute(
-                """INSERT INTO dbo.ADWPM_DQ_RESULTS
-                   (run_id, business_date, check_name, check_type, target_table,
-                    severity, passed, expected_value, actual_value, details)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                (run_id, business_date, r["check_name"], r["check_type"],
-                 r["target_table"], r["severity"],
-                 1 if r["passed"] else 0,
-                 r["expected_value"], r["actual_value"], r["details"])
-            )
+        dq_insert_sql = """INSERT INTO dbo.ADWPM_DQ_RESULTS
+	                   (run_id, business_date, check_name, check_type, target_table,
+	                    severity, passed, expected_value, actual_value, details)
+	                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+        with _db_span("sqlserver", "INSERT", "ADWPM_DQ_RESULTS", dq_insert_sql, rows=len(results)) as span:
+            for r in results:
+                sql_cur.execute(
+                    dq_insert_sql,
+                    (run_id, business_date, r["check_name"], r["check_type"],
+                     r["target_table"], r["severity"],
+                     1 if r["passed"] else 0,
+                     r["expected_value"], r["actual_value"], r["details"])
+                )
+            span.set_tag("db.rows_inserted", len(results))
 
-        sql_conn.commit()
+        with _db_span("sqlserver", "COMMIT", "ADWPM_DQ_RESULTS"):
+            sql_conn.commit()
 
         checks_failed = sum(1 for r in results if not r["passed"])
         critical_failures = sum(1 for r in results if not r["passed"] and r["severity"] == "critical")
@@ -577,16 +765,19 @@ def run_publish_d1_reports(business_date):
             {
                 "query": "SELECT * FROM dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO WHERE trade_dt = %s",
                 "params": (business_date,),
+                "table": "ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO",
                 "filename": f"derivatives/ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO_{business_date}.csv",
             },
             {
                 "query": "SELECT * FROM dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL WHERE position_date = %s",
                 "params": (business_date,),
+                "table": "ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL",
                 "filename": f"derivatives/ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL_{business_date}.csv",
             },
             {
                 "query": "SELECT * FROM dbo.ADWPM_POSICAO_MERCADO_A_VISTA WHERE position_date = %s",
                 "params": (business_date,),
+                "table": "ADWPM_POSICAO_MERCADO_A_VISTA",
                 "filename": f"spot/ADWPM_POSICAO_MERCADO_A_VISTA_{business_date}.csv",
             },
         ]
@@ -594,15 +785,27 @@ def run_publish_d1_reports(business_date):
         # MinIO upload
         try:
             from minio import Minio
-            minio_client = Minio(
-                os.environ.get("MINIO_ENDPOINT", "minio:9000"),
-                access_key=os.environ.get("MINIO_ACCESS_KEY", "minioadmin"),
-                secret_key=os.environ.get("MINIO_SECRET_KEY", "minioadmin"),
-                secure=False,
-            )
             bucket = "mock-exchange"
-            if not minio_client.bucket_exists(bucket):
-                minio_client.make_bucket(bucket)
+            with _client_span(
+                "s3.connect",
+                service="mock-exchange",
+                resource=os.environ.get("MINIO_ENDPOINT", "minio:9000"),
+                span_type="http",
+                component="minio",
+                **{
+                    "aws.s3.bucket": bucket,
+                    "network.destination.name": os.environ.get("MINIO_ENDPOINT", "minio:9000"),
+                    "peer.service": "mock-exchange",
+                },
+            ):
+                minio_client = Minio(
+                    os.environ.get("MINIO_ENDPOINT", "minio:9000"),
+                    access_key=os.environ.get("MINIO_ACCESS_KEY", "minioadmin"),
+                    secret_key=os.environ.get("MINIO_SECRET_KEY", "minioadmin"),
+                    secure=False,
+                )
+                if not minio_client.bucket_exists(bucket):
+                    minio_client.make_bucket(bucket)
         except Exception as exc:
             logger.warning("MinIO not available (%s), skipping S3 export", exc)
             minio_client = None
@@ -610,9 +813,15 @@ def run_publish_d1_reports(business_date):
         total_rows = 0
 
         for export in exports:
-            sql_cur.execute(export["query"], export["params"])
+            rows = _db_fetchall(
+                sql_cur,
+                "sqlserver",
+                "SELECT",
+                export["table"],
+                export["query"],
+                export["params"],
+            )
             columns = [desc[0] for desc in sql_cur.description]
-            rows = sql_cur.fetchall()
             total_rows += len(rows)
 
             if minio_client and rows:
@@ -623,11 +832,25 @@ def run_publish_d1_reports(business_date):
                     writer.writerow([str(v) if v is not None else "" for v in row])
 
                 data = buf.getvalue().encode("utf-8")
-                minio_client.put_object(
-                    bucket, export["filename"],
-                    io.BytesIO(data), len(data),
-                    content_type="text/csv",
-                )
+                with _client_span(
+                    "s3.put_object",
+                    service="mock-exchange",
+                    resource=export["filename"],
+                    span_type="http",
+                    component="minio",
+                    **{
+                        "aws.s3.bucket": bucket,
+                        "aws.s3.key": export["filename"],
+                        "s3.rows": len(rows),
+                        "s3.bytes": len(data),
+                        "peer.service": "mock-exchange",
+                    },
+                ):
+                    minio_client.put_object(
+                        bucket, export["filename"],
+                        io.BytesIO(data), len(data),
+                        content_type="text/csv",
+                    )
                 files_exported.append(f"s3://{bucket}/{export['filename']}")
                 logger.info("Exported %d rows to %s", len(rows), export["filename"])
 

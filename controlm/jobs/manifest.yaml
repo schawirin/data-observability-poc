@@ -1,0 +1,129 @@
+# Pipeline manifest — source of truth for Control-M jobs in this POC.
+#
+# Edit this file to add/modify jobs. Then run `make ctm-generate` to regenerate
+# the four Job:Type variants (script / command / embedded / database) and the
+# JOB_IO table consumed by run_job.py.
+#
+# DO NOT edit the generated files directly — they will be overwritten.
+
+pipeline:
+  name: B3_D1_Pipeline
+  namespace: b3-poc-demo-v3
+  producer: "https://github.com/b3-poc/controlm-workbench"
+
+# Default Control-M %%VARIABLE%% values. B3 overrides these in Helix
+# according to their environment (Linux/Windows, Python global/venv/py launcher).
+defaults:
+  ctm_agent_host: "%%CTM_AGENT_HOST%%"
+  run_as:         "%%RUN_AS%%"
+  python_bin:     "%%PYTHON_BIN%%"
+  script_dir:     "%%SCRIPT_DIR%%"
+  path_sep:       "%%PATH_SEP%%"
+
+# Recommended default values for variables (Workbench/Linux). B3 overrides
+# in Helix Web UI when their config differs.
+variable_defaults:
+  CTM_AGENT_HOST: workbench
+  RUN_AS:         workbench
+  PYTHON_BIN:     python3
+  SCRIPT_DIR:     /scripts
+  PATH_SEP:       /
+
+# OpenLineage dataset namespaces. Reused by every job.
+datasets:
+  oracle:    "oracle://demo-oracle:1521"
+  sqlserver: "sqlserver://demo-sqlserver:1433"
+  mysql:     "mysql://demo-mysql:3306/exchange"
+  minio:     "s3://mock-exchange"
+
+# Lineage-only jobs are emitted by the simulator to represent data landing
+# before the Control-M D+1 jobs start. They are not generated as Control-M jobs.
+lineage_only_jobs:
+  - name: market_data_ingest
+    description: "Python market data generator — refreshes Oracle ASTA source tables"
+    inputs: []
+    outputs:
+      - {ns: oracle, name: "XEPDB1.DEMOPOC.ASTADRVT_TRADE_MVMT"}
+      - {ns: oracle, name: "XEPDB1.DEMOPOC.ASTANO_FGBE_DRVT_PSTN"}
+      - {ns: oracle, name: "XEPDB1.DEMOPOC.ASTACASH_MRKT_PSTN"}
+
+# Pipeline jobs. Add a new entry here + run `make ctm-generate` to extend.
+jobs:
+  - name: close_market_eod
+    sla: "00:10"
+    depends_on: null
+    description: "EOD market close — consolidates book, calculates closing prices and VWAP"
+    inputs:
+      - {ns: oracle, name: "XEPDB1.DEMOPOC.ASTADRVT_TRADE_MVMT"}
+    outputs:
+      - {ns: sqlserver, name: "demopoc.dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO"}
+    # Optional SQL block used by Job:Database variant. Omit to skip that variant
+    # for this job (the generator will exclude it from market_d1_database.json).
+    sql:
+      type: oracle
+      query: |
+        SELECT COUNT(*) AS row_count
+        FROM DEMOPOC.ASTADRVT_TRADE_MVMT
+        WHERE business_date = ?
+
+  - name: reconcile_d1_positions
+    sla: "00:15"
+    depends_on: close_market_eod
+    description: "D+1 reconciliation — matches trades to settlement instructions and participant positions"
+    inputs:
+      - {ns: oracle, name: "XEPDB1.DEMOPOC.ASTANO_FGBE_DRVT_PSTN"}
+      - {ns: oracle, name: "XEPDB1.DEMOPOC.ASTACASH_MRKT_PSTN"}
+    outputs:
+      - {ns: sqlserver, name: "demopoc.dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL"}
+      - {ns: sqlserver, name: "demopoc.dbo.ADWPM_POSICAO_MERCADO_A_VISTA"}
+    sql:
+      type: oracle
+      query: |
+        SELECT COUNT(*) AS row_count
+        FROM DEMOPOC.ASTANO_FGBE_DRVT_PSTN
+        WHERE business_date = ?
+
+  - name: quality_gate_d1
+    sla: "00:05"
+    depends_on: reconcile_d1_positions
+    description: "D+1 quality gate — completeness, uniqueness, consistency, reasonableness, timeliness"
+    inputs:
+      - {ns: sqlserver, name: "demopoc.dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO"}
+      - {ns: sqlserver, name: "demopoc.dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL"}
+      - {ns: sqlserver, name: "demopoc.dbo.ADWPM_POSICAO_MERCADO_A_VISTA"}
+    outputs:
+      - {ns: sqlserver, name: "demopoc.dbo.ADWPM_DQ_RESULTS"}
+    # SQL variant runs the actual DQ checks (duplicates, nulls, zero-sum)
+    # against SQL Server when B3 has no Python on agents.
+    sql:
+      type: mssql
+      query: |
+        -- DQ checks: duplicates + nulls + zero-sum
+        DECLARE @dups INT, @nulls INT, @zeros INT;
+        SELECT @dups = COUNT(*) - COUNT(DISTINCT trade_id)
+          FROM dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO
+          WHERE business_date = ?;
+        SELECT @nulls = COUNT(*)
+          FROM dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL
+          WHERE business_date = ? AND settlement_price IS NULL;
+        SELECT @zeros = COUNT(*)
+          FROM dbo.ADWPM_POSICAO_MERCADO_A_VISTA
+          WHERE business_date = ? AND (long_value + short_value) = 0;
+        IF (@dups > 0 OR @nulls > 0 OR @zeros > 0)
+          RAISERROR('DQ FAIL: dups=%d nulls=%d zeros=%d', 16, 1, @dups, @nulls, @zeros);
+
+  - name: publish_d1_reports
+    sla: "00:10"
+    depends_on: quality_gate_d1
+    description: "D+1 publish — generates curated reports and exports CSV/Parquet to S3/MinIO"
+    inputs:
+      - {ns: sqlserver, name: "demopoc.dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO"}
+      - {ns: sqlserver, name: "demopoc.dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL"}
+      - {ns: sqlserver, name: "demopoc.dbo.ADWPM_POSICAO_MERCADO_A_VISTA"}
+      - {ns: sqlserver, name: "demopoc.dbo.ADWPM_DQ_RESULTS"}
+    outputs:
+      - {ns: minio, name: "derivatives/ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO.parquet"}
+      - {ns: minio, name: "derivatives/ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL.parquet"}
+      - {ns: minio, name: "spot/ADWPM_POSICAO_MERCADO_A_VISTA.csv"}
+    # No sql: block — this job exports files, not appropriate for Job:Database.
+    # Generator will skip it in market_d1_database.json.

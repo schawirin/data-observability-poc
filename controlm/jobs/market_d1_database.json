@@ -1,0 +1,54 @@
+{
+  "B3_D1_Pipeline": {
+    "Type": "SimpleFolder",
+    "Comment": "Auto-generated. Variant: Job:Database (pure SQL, no Python on agent). Only jobs with a sql: block in the manifest are included. Deploy: setup.sh --variant database",
+    "B3_close_market_eod": {
+      "Type": "Job:Database",
+      "ConnectionProfile": "%%DB_CONN_ORACLE%%",
+      "SQLScript": "SELECT COUNT(*) AS row_count\nFROM DEMOPOC.ASTADRVT_TRADE_MVMT\nWHERE business_date = ?\n",
+      "Autocommit": "Y",
+      "Host": "%%CTM_AGENT_HOST%%",
+      "RunAs": "%%RUN_AS%%",
+      "Description": "EOD market close — consolidates book, calculates closing prices and VWAP",
+      "SLA": {
+        "Duration": "00:10"
+      }
+    },
+    "B3_reconcile_d1_positions": {
+      "Type": "Job:Database",
+      "ConnectionProfile": "%%DB_CONN_ORACLE%%",
+      "SQLScript": "SELECT COUNT(*) AS row_count\nFROM DEMOPOC.ASTANO_FGBE_DRVT_PSTN\nWHERE business_date = ?\n",
+      "Autocommit": "Y",
+      "Host": "%%CTM_AGENT_HOST%%",
+      "RunAs": "%%RUN_AS%%",
+      "Description": "D+1 reconciliation — matches trades to settlement instructions and participant positions",
+      "SLA": {
+        "Duration": "00:15"
+      },
+      "DependsOn": [
+        {
+          "Name": "B3_close_market_eod",
+          "State": "OK"
+        }
+      ]
+    },
+    "B3_quality_gate_d1": {
+      "Type": "Job:Database",
+      "ConnectionProfile": "%%DB_CONN_MSSQL%%",
+      "SQLScript": "-- DQ checks: duplicates + nulls + zero-sum\nDECLARE @dups INT, @nulls INT, @zeros INT;\nSELECT @dups = COUNT(*) - COUNT(DISTINCT trade_id)\n  FROM dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO\n  WHERE business_date = ?;\nSELECT @nulls = COUNT(*)\n  FROM dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL\n  WHERE business_date = ? AND settlement_price IS NULL;\nSELECT @zeros = COUNT(*)\n  FROM dbo.ADWPM_POSICAO_MERCADO_A_VISTA\n  WHERE business_date = ? AND (long_value + short_value) = 0;\nIF (@dups > 0 OR @nulls > 0 OR @zeros > 0)\n  RAISERROR('DQ FAIL: dups=%d nulls=%d zeros=%d', 16, 1, @dups, @nulls, @zeros);\n",
+      "Autocommit": "Y",
+      "Host": "%%CTM_AGENT_HOST%%",
+      "RunAs": "%%RUN_AS%%",
+      "Description": "D+1 quality gate — completeness, uniqueness, consistency, reasonableness, timeliness",
+      "SLA": {
+        "Duration": "00:05"
+      },
+      "DependsOn": [
+        {
+          "Name": "B3_reconcile_d1_positions",
+          "State": "OK"
+        }
+      ]
+    }
+  }
+}

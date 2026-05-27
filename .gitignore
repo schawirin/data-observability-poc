@@ -13,6 +13,9 @@ target/
 logs/
 dbt-logs-*/
 
+# Generator venv (Makefile ctm-generate target)
+.venv-generator/
+
 # Binary & media files
 *.pdf
 *.png

@@ -16,7 +16,7 @@ import logging
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -142,108 +142,64 @@ DD_SITE = os.environ.get("DD_SITE", "datadoghq.com")
 DD_API_KEY = os.environ.get("DD_API_KEY", "")
 DIRECT_URL = f"https://data-obs-intake.{DD_SITE}/api/v1/lineage"
 
-JOB_NAMESPACE = "exchange-poc"
-ORACLE_NS    = "oracle://demoorg-oracle:1521/FREEPDB1"    # Oracle 23c Free PDB (ASTA* tables)
-SQLSERVER_NS = "sqlserver://demoorg-sqlserver:1433/demopoc"  # SQL Server DW (ADWPM* tables)
-MYSQL_NS     = "mysql://demo-mysql:3306/exchange"                 # MySQL staging layer (fallback)
-MINIO_NS     = "s3://mock-exchange"                             # MinIO = S3 simulation
-
 # HTTP trigger server in the pipeline-runner container
 PIPELINE_TRIGGER_HOST = os.environ.get("PIPELINE_TRIGGER_HOST", "demo-pipeline-runner")
 PIPELINE_TRIGGER_PORT = os.environ.get("PIPELINE_TRIGGER_PORT", "5002")  # trigger server port
 
-# ── Dataset I/O map ─────────────────────────────────────────────────────────
-# Reflects real exchange table names in Oracle (ASTA*) and SQL Server DW (ADWPM*).
-# OpenLineage lineage always shows the real table names regardless of fallback.
-JOB_IO = {
-    "close_market_eod": {
-        "inputs": [
-            {"namespace": ORACLE_NS, "name": "DEMOPOC.ASTADRVT_TRADE_MVMT"},
-        ],
-        "outputs": [
-            {"namespace": SQLSERVER_NS, "name": "dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO"},
-        ],
-    },
-    "reconcile_d1_positions": {
-        "inputs": [
-            {"namespace": ORACLE_NS, "name": "DEMOPOC.ASTANO_FGBE_DRVT_PSTN"},
-            {"namespace": ORACLE_NS, "name": "DEMOPOC.ASTACASH_MRKT_PSTN"},
-        ],
-        "outputs": [
-            {"namespace": SQLSERVER_NS, "name": "dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL"},
-            {"namespace": SQLSERVER_NS, "name": "dbo.ADWPM_POSICAO_MERCADO_A_VISTA"},
-        ],
-    },
-    "quality_gate_d1": {
-        "inputs": [
-            {"namespace": SQLSERVER_NS, "name": "dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO"},
-            {"namespace": SQLSERVER_NS, "name": "dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL"},
-            {"namespace": SQLSERVER_NS, "name": "dbo.ADWPM_POSICAO_MERCADO_A_VISTA"},
-        ],
-        "outputs": [
-            {"namespace": SQLSERVER_NS, "name": "dbo.ADWPM_DQ_RESULTS"},
-        ],
-    },
-    "publish_d1_reports": {
-        "inputs": [
-            {"namespace": SQLSERVER_NS, "name": "dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO"},
-            {"namespace": SQLSERVER_NS, "name": "dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL"},
-            {"namespace": SQLSERVER_NS, "name": "dbo.ADWPM_POSICAO_MERCADO_A_VISTA"},
-        ],
-        "outputs": [
-            {"namespace": MINIO_NS, "name": "derivatives/ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO"},
-            {"namespace": MINIO_NS, "name": "derivatives/ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL"},
-            {"namespace": MINIO_NS, "name": "spot/ADWPM_POSICAO_MERCADO_A_VISTA"},
-        ],
-    },
-}
+# ── Dataset I/O map (generated from controlm/jobs/manifest.yaml) ────────────
+# Edit the manifest and run `make ctm-generate` to refresh.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _job_io_generated import JOB_IO, JOB_NAMESPACE, PIPELINE_NAME, PRODUCER  # noqa: E402
 
 
-PIPELINE_NAME = "market_d1_pipeline"
+def _event_time():
+    shift_hours = float(os.environ.get("OL_EVENT_TIME_SHIFT_HOURS", "0"))
+    now = datetime.now(timezone.utc) + timedelta(hours=shift_hours)
+    return now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _build_event(event_type, job_name, run_id, business_date, parent_run_id=None, error=None):
     io = JOB_IO.get(job_name, {"inputs": [], "outputs": []})
     run_facets = {
         "business_date": {
-            "_producer": "https://github.com/exchange-poc/controlm-workbench",
+            "_producer": PRODUCER,
             "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/CustomFacet.json",
             "business_date": business_date,
+        },
+        "controlm": {
+            "_producer": PRODUCER,
+            "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/CustomFacet.json",
+            "orchestrator": "control-m",
+            "pipeline": PIPELINE_NAME,
+            "pipelineRunId": parent_run_id,
+            "wrapper": "run_job.py",
         }
     }
-    # Parent run facet — groups all 4 jobs under the same pipeline run in Datadog DJM
-    if parent_run_id:
-        run_facets["parent"] = {
-            "_producer": "https://github.com/exchange-poc/controlm-workbench",
-            "_schemaURL": "https://openlineage.io/spec/facets/2-0-2/ParentRunFacet.json",
-            "run": {"runId": parent_run_id},
-            "job": {"namespace": JOB_NAMESPACE, "name": PIPELINE_NAME},
-        }
     if error:
         run_facets["errorMessage"] = {
-            "_producer": "https://github.com/exchange-poc/controlm-workbench",
+            "_producer": PRODUCER,
             "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/ErrorMessageRunFacet.json",
             "message": str(error),
             "programmingLanguage": "python",
         }
     job_facets = {
         "jobType": {
-            "_producer": "https://github.com/exchange-poc/controlm-workbench",
-            "_schemaURL": "https://openlineage.io/spec/facets/1-1-1/JobTypeJobFacet.json",
+            "_producer": PRODUCER,
+            "_schemaURL": "https://openlineage.io/spec/facets/2-0-3/JobTypeJobFacet.json",
             "processingType": "BATCH",
-            "integration": "CONTROL_M",
+            "integration": "custom",
             "jobType": "JOB",
         }
     }
     return {
         "eventType": event_type,
-        "eventTime": datetime.now(timezone.utc).isoformat(),
+        "eventTime": _event_time(),
         "run": {"runId": run_id, "facets": run_facets},
         "job": {"namespace": JOB_NAMESPACE, "name": job_name, "facets": job_facets},
         "inputs":  [{"namespace": d["namespace"], "name": d["name"], "facets": {}} for d in io["inputs"]],
         "outputs": [{"namespace": d["namespace"], "name": d["name"], "facets": {}} for d in io["outputs"]],
-        "producer": "https://github.com/exchange-poc/controlm-workbench",
-        "schemaURL": "https://openlineage.io/spec/1-0-5/OpenLineage.json#/$defs/RunEvent",
+        "producer": PRODUCER,
+        "schemaURL": "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunEvent",
     }
 
 
@@ -319,7 +275,9 @@ def main():
     run_id = str(hashlib.md5(f"{job_name}-{business_date}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M')}".encode()).hexdigest())
     run_id = f"{run_id[:8]}-{run_id[8:12]}-{run_id[12:16]}-{run_id[16:20]}-{run_id[20:32]}"
 
-    # parent_run_id: same for all 4 jobs in the same date+hour → groups them as one pipeline run
+    # parent_run_id: same for all 4 jobs in the same date+hour. We keep it as a
+    # custom facet/tag only; using an official parent-run grouping collapses the
+    # Datadog lineage graph under b3_d1_pipeline and hides the actual Python jobs.
     parent_run_id = str(hashlib.md5(f"{PIPELINE_NAME}-{business_date}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H')}".encode()).hexdigest())
     parent_run_id = f"{parent_run_id[:8]}-{parent_run_id[8:12]}-{parent_run_id[12:16]}-{parent_run_id[16:20]}-{parent_run_id[20:32]}"
 

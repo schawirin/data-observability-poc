@@ -1,0 +1,40 @@
+logs:
+  - type: file
+    path: /var/log/controlm-sim/logs/controlm-sim.log
+    source: python
+    service: controlm-sim
+    tags:
+      - env:demo
+      - team:data-platform
+      - component:controlm
+      - log_type:application
+
+  - type: file
+    path: /var/log/controlm-sim/logs/jobs.jsonl
+    source: python
+    service: controlm-sim
+    tags:
+      - env:demo
+      - team:data-platform
+      - component:controlm
+      - log_type:job_execution
+
+  - type: file
+    path: /var/log/controlm-sim/runs.jsonl
+    source: python
+    service: controlm-sim
+    tags:
+      - env:demo
+      - team:data-platform
+      - component:controlm
+      - log_type:pipeline_history
+
+  - type: file
+    path: /var/log/b3-demo/demo-cron.log
+    source: shell
+    service: demo-cron
+    tags:
+      - env:demo
+      - team:data-platform
+      - component:controlm
+      - log_type:cron_rotation

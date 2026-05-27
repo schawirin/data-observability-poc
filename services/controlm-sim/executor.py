@@ -17,6 +17,7 @@ import os
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 
 from ddtrace import tracer
 
@@ -32,6 +33,7 @@ from controlm_metrics import (
     emit_dq_check_result,
 )
 from etl_oracle_to_sqlserver import run_job as run_etl_job
+from log_correlation import datadog_correlation_fields
 
 try:
     from pipeline_finalizer import emit_pipeline_complete as _emit_pipeline_complete
@@ -43,19 +45,44 @@ logger = logging.getLogger("controlm-sim.executor")
 MAX_RETRIES = 2
 
 
+def _append_jsonl(path, record):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, default=str) + "\n")
+    except Exception as exc:
+        logger.debug("failed to append structured log %s: %s", path, exc)
+
+
 def _log_structured(**fields):
     """Emit a structured JSON log line."""
+    fields.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+    fields.setdefault("service", os.environ.get("DD_SERVICE", "controlm-sim"))
+    fields.setdefault("env", os.environ.get("DD_ENV", "demo"))
+    fields.setdefault("version", os.environ.get("DD_VERSION", "2.0.0"))
+    fields.setdefault("pipeline", "b3_d1_pipeline")
+    fields.setdefault("component", "controlm")
+    fields.setdefault("log_type", "job_execution")
+    fields.update(datadog_correlation_fields())
+    fields.setdefault("trace_id", fields.get("dd.trace_id", "0"))
+    fields.setdefault("span_id", fields.get("dd.span_id", "0"))
     job_name = fields.get("job_name")
     status = fields.get("status")
     if job_name:
+        fields.setdefault("ctm_job", job_name)
         fields.setdefault("job", {})
         fields["job"].setdefault("name", job_name)
         if status:
             fields["job"].setdefault("status", status)
+    if "business_date" in fields:
+        fields.setdefault("ctm_order_date", fields["business_date"])
+    if "run_id" in fields:
+        fields.setdefault("ctm_run_id", fields["run_id"])
     if "sla_miss" in fields:
         fields.setdefault("sla", {})
         fields["sla"].setdefault("miss", fields["sla_miss"])
     print(json.dumps(fields, default=str), flush=True)
+    _append_jsonl("/data/logs/jobs.jsonl", fields)
 
 
 def execute_job(job_name, business_date, run_id=None, parent_run_id=None):
@@ -66,6 +93,28 @@ def execute_job(job_name, business_date, run_id=None, parent_run_id=None):
     job_def = get_job(job_name)
     sla_seconds = job_def["sla_seconds"]
     run_id = run_id or str(uuid.uuid4())
+    job_started_at = time.time()
+    run_span = tracer.trace(
+        "controlm.job.run",
+        service="controlm-sim",
+        resource=job_name,
+        span_type="worker",
+    )
+    run_span.set_tags(
+        {
+            "env": "demo",
+            "team": "data-platform",
+            "domain": "capital-markets",
+            "pipeline": "b3_d1_pipeline",
+            "orchestrator": "controlm-sim",
+            "business_date": business_date,
+            "job.name": job_name,
+            "job.status": "running",
+            "ol.namespace": os.environ.get("OL_NAMESPACE", "b3-poc-demo-v3"),
+            "ol.run_id": run_id,
+            "ol.pipeline_run_id": parent_run_id or "",
+        }
+    )
 
     # Emit OpenLineage START
     emit_start(
@@ -100,7 +149,7 @@ def execute_job(job_name, business_date, run_id=None, parent_run_id=None):
                         "env": "demo",
                         "team": "data-platform",
                         "domain": "capital-markets",
-                        "pipeline": "market-d1",
+                        "pipeline": "b3_d1_pipeline",
                         "orchestrator": "controlm-sim",
                         "business_date": business_date,
                         "stage": job_name,
@@ -111,6 +160,20 @@ def execute_job(job_name, business_date, run_id=None, parent_run_id=None):
 
                 # Execute the ETL job (Oracle → SQL Server)
                 result = run_etl_job(job_name, business_date)
+
+                # Production-realistic padding: stream periodic progress updates
+                # so Datadog sees the job as long-running (matters for DJM
+                # aggregation + lineage UI Duration / job_runs widgets).
+                padding = job_def.get("padding_seconds", 0)
+                if padding > 0:
+                    logger.info("Padding %s with %ds of realistic duration", job_name, padding)
+                    # Emit one heartbeat span tag per 10s to look "live" in APM
+                    elapsed_padding = 0
+                    step = 10
+                    while elapsed_padding < padding:
+                        time.sleep(min(step, padding - elapsed_padding))
+                        elapsed_padding += step
+                        span.set_tag(f"progress_pct", min(100, int(elapsed_padding / padding * 100)))
 
                 duration = time.time() - start_time
                 sla_miss = duration > sla_seconds
@@ -163,6 +226,16 @@ def execute_job(job_name, business_date, run_id=None, parent_run_id=None):
                             expected_value=check.get("expected_value"),
                         )
 
+                run_span.set_tags(
+                    {
+                        "job.status": "success",
+                        "duration_seconds": round(time.time() - job_started_at, 2),
+                        "retries": retries,
+                        "sla_miss": sla_miss,
+                        "output_rows": output_rows,
+                    }
+                )
+                run_span.finish()
                 return {
                     "status": "success",
                     "duration_seconds": round(duration, 2),
@@ -230,6 +303,18 @@ def execute_job(job_name, business_date, run_id=None, parent_run_id=None):
         error=str(last_error),
     )
 
+    run_span.error = 1
+    run_span.set_tags(
+        {
+            "job.status": "failed",
+            "duration_seconds": round(time.time() - job_started_at, 2),
+            "retries": retries - 1,
+            "sla_miss": sla_miss,
+            "error.msg": str(last_error),
+            "error.type": type(last_error).__name__ if last_error else "Exception",
+        }
+    )
+    run_span.finish()
     return {
         "status": "failed",
         "duration_seconds": round(duration, 2),
@@ -257,21 +342,105 @@ def execute_pipeline(business_date, inject_fault=None):
         len(order),
     )
 
-    # Emit pipeline-level START (OpenLineage + Control-M)
-    emit_start(
-        job_name=pipeline_name,
-        run_id=pipeline_run_id,
-        business_date=business_date,
-    )
+    # Emit Control-M pipeline metrics, but do not emit OpenLineage datasets for
+    # the pipeline itself. Lineage should show the real Python jobs in the middle
+    # of the graph, not a collapsed Oracle -> pipeline -> S3 shortcut.
     emit_pipeline_started(pipeline_name, business_date, pipeline_run_id, len(order))
 
-    # Seed Oracle data with optional fault injection
+    # Seed Oracle data with optional fault injection. This is represented as a
+    # lineage-only Python job so Oracle source datasets get freshness/row-count
+    # and the graph starts from an executable job instead of a floating dataset.
+    seed_run_id = str(uuid.uuid4())
+    seed_started_at = time.time()
+    seed_span = tracer.trace(
+        "controlm.job.run",
+        service="controlm-sim",
+        resource="market_data_ingest",
+        span_type="worker",
+    )
+    seed_span.set_tags(
+        {
+            "env": "demo",
+            "team": "data-platform",
+            "domain": "capital-markets",
+            "pipeline": pipeline_name,
+            "orchestrator": "controlm-sim",
+            "business_date": business_date,
+            "job.name": "market_data_ingest",
+            "job.status": "running",
+            "ol.namespace": os.environ.get("OL_NAMESPACE", "b3-poc-demo-v3"),
+            "ol.run_id": seed_run_id,
+            "ol.pipeline_run_id": pipeline_run_id,
+        }
+    )
+    emit_start(
+        job_name="market_data_ingest",
+        run_id=seed_run_id,
+        parent_run_id=pipeline_run_id,
+        business_date=business_date,
+    )
     try:
         from etl_oracle_to_sqlserver import seed_oracle_data
         seed_result = seed_oracle_data(business_date, inject_fault=inject_fault)
         logger.info("Oracle data seeded: %s", seed_result)
+        emit_complete(
+            job_name="market_data_ingest",
+            run_id=seed_run_id,
+            parent_run_id=pipeline_run_id,
+            business_date=business_date,
+        )
+        seed_output_rows = sum(
+            seed_result.get(k, 0)
+            for k in ("trades", "derivative_positions", "cash_positions")
+        )
+        _log_structured(
+            job_name="market_data_ingest",
+            run_id=seed_run_id,
+            business_date=business_date,
+            status="success",
+            duration_seconds=round(time.time() - seed_started_at, 2),
+            retries=0,
+            sla_miss=False,
+            output_rows=seed_output_rows,
+            fault_injected=seed_result.get("fault_injected"),
+        )
+        seed_span.set_tags(
+            {
+                "job.status": "success",
+                "duration_seconds": round(time.time() - seed_started_at, 2),
+                "output_rows": seed_output_rows,
+            }
+        )
+        seed_span.finish()
     except Exception as exc:
         logger.warning("Oracle seeding failed (non-blocking): %s", exc)
+        emit_fail(
+            job_name="market_data_ingest",
+            run_id=seed_run_id,
+            parent_run_id=pipeline_run_id,
+            business_date=business_date,
+            error=str(exc),
+        )
+        _log_structured(
+            job_name="market_data_ingest",
+            run_id=seed_run_id,
+            business_date=business_date,
+            status="failed",
+            duration_seconds=round(time.time() - seed_started_at, 2),
+            retries=0,
+            sla_miss=False,
+            error=str(exc),
+        )
+        seed_span.error = 1
+        seed_span.set_tags(
+            {
+                "job.status": "failed",
+                "duration_seconds": round(time.time() - seed_started_at, 2),
+                "error.msg": str(exc),
+                "error.type": type(exc).__name__,
+            }
+        )
+        seed_span.finish()
 
     results = {}
     pipeline_start = time.time()
@@ -294,19 +463,13 @@ def execute_pipeline(business_date, inject_fault=None):
         if outcome["status"] == "failed":
             jobs_notok += 1
             logger.error("Job %s failed — aborting pipeline.", job_name)
-            emit_fail(
-                job_name=pipeline_name,
-                run_id=pipeline_run_id,
-                business_date=business_date,
-                error=f"Job {job_name} failed: {outcome.get('error', 'unknown')}",
-            )
             # Emit Control-M pipeline failed
             emit_pipeline_completed(
                 pipeline_name, business_date, pipeline_run_id,
                 duration_seconds=round(time.time() - pipeline_start, 2),
                 jobs_ok=jobs_ok, jobs_notok=jobs_notok, total_jobs=len(order),
             )
-            return {
+            final = {
                 "pipeline": pipeline_name,
                 "run_id": pipeline_run_id,
                 "business_date": business_date,
@@ -314,17 +477,12 @@ def execute_pipeline(business_date, inject_fault=None):
                 "duration_seconds": round(time.time() - pipeline_start, 2),
                 "jobs": results,
             }
+            _persist_run(final)
+            return final
         else:
             jobs_ok += 1
 
     pipeline_duration = time.time() - pipeline_start
-
-    # Emit pipeline-level COMPLETE (OpenLineage)
-    emit_complete(
-        job_name=pipeline_name,
-        run_id=pipeline_run_id,
-        business_date=business_date,
-    )
 
     # Emit Control-M pipeline completed
     emit_pipeline_completed(
@@ -356,4 +514,41 @@ def execute_pipeline(business_date, inject_fault=None):
         except Exception as exc:
             logger.warning("pipeline_finalizer failed (non-blocking): %s", exc)
 
+    # Persist run summary to /data/runs.jsonl for the History tab in the UI.
+    _persist_run(final)
+
     return final
+
+
+def _persist_run(summary):
+    """Append a one-line JSON record to /data/runs.jsonl for the History tab."""
+    import datetime as _dt
+    runs_file = "/data/runs.jsonl"
+    record = {
+        "timestamp":        _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "service":          os.environ.get("DD_SERVICE", "controlm-sim"),
+        "env":              os.environ.get("DD_ENV", "demo"),
+        "version":          os.environ.get("DD_VERSION", "2.0.0"),
+        "component":        "controlm",
+        "log_type":         "pipeline_history",
+        "pipeline":         summary.get("pipeline"),
+        "run_id":           summary.get("run_id"),
+        "ctm_run_id":       summary.get("run_id"),
+        "business_date":    summary.get("business_date"),
+        "ctm_order_date":   summary.get("business_date"),
+        "ctm_job":          summary.get("pipeline"),
+        "status":           summary.get("status"),
+        "duration_seconds": summary.get("duration_seconds"),
+        "finished_at":      _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "job_count":        len(summary.get("jobs", {})),
+        "job_summary": {
+            jn: {"status": jr.get("status"), "duration_seconds": jr.get("duration_seconds")}
+            for jn, jr in summary.get("jobs", {}).items()
+        },
+    }
+    try:
+        os.makedirs(os.path.dirname(runs_file), exist_ok=True)
+        with open(runs_file, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, default=str) + "\n")
+    except Exception as exc:
+        logger.warning("persist_run failed (non-blocking): %s", exc)

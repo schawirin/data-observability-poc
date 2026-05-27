@@ -1,0 +1,1135 @@
+{
+  "title": "B3 — Control-M Pipeline Operations",
+  "description": "Pipeline Market_D1_Pipeline | Oracle ASTA* → Control-M → SQL Server ADWPM* → MinIO (adapted to current metric set 2026-05-26)",
+  "widgets": [
+    {
+      "id": 7293721289040100,
+      "definition": {
+        "type": "note",
+        "content": "## B3 Control-M Pipeline Operations\n**Pipeline:** Market_D1_Pipeline &nbsp;|&nbsp; **Env:** demo &nbsp;|&nbsp; Oracle → SQL Server → MinIO",
+        "background_color": "blue",
+        "font_size": "16",
+        "text_align": "left",
+        "vertical_align": "center",
+        "show_tick": false,
+        "has_padding": true
+      },
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 12,
+        "height": 1
+      }
+    },
+    {
+      "id": 3868968164780579,
+      "definition": {
+        "title": "Pipelines OK",
+        "type": "query_value",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "q1",
+                "query": "sum:controlm.folder.ended_ok{env:demo,service:controlm-sim,$ctm_order_date}",
+                "aggregator": "max"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "q1"
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": ">",
+                "value": 0,
+                "palette": "white_on_green"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 0,
+        "y": 1,
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": 4134600757499457,
+      "definition": {
+        "title": "Pipelines FAILED",
+        "type": "query_value",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "q1",
+                "query": "sum:controlm.folder.ended_not_ok{env:demo,service:controlm-sim,$ctm_order_date}",
+                "aggregator": "max"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "q1"
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": "<=",
+                "value": 0,
+                "palette": "white_on_green"
+              },
+              {
+                "comparator": ">",
+                "value": 0,
+                "palette": "white_on_red"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 2,
+        "y": 1,
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": 8424695693899161,
+      "definition": {
+        "title": "Jobs OK",
+        "type": "query_value",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "q1",
+                "query": "sum:controlm.job.ended_ok.count{env:demo,service:controlm-sim,$ctm_job}.as_count()",
+                "aggregator": "sum"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "q1"
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": ">",
+                "value": 0,
+                "palette": "white_on_green"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 4,
+        "y": 1,
+        "width": 2,
+        "height": 1
+      }
+    },
+    {
+      "id": 5080529203489602,
+      "definition": {
+        "title": "Duplicatas detectadas (DQ)",
+        "type": "query_value",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "q1",
+                "query": "max:controlm.dq.actual_value{env:demo,service:controlm-sim,check_name:caso1_duplicate_trades}",
+                "aggregator": "max"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "q1"
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": "<=",
+                "value": 0,
+                "palette": "white_on_green"
+              },
+              {
+                "comparator": ">",
+                "value": 0,
+                "palette": "white_on_red"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 6,
+        "y": 1,
+        "width": 2,
+        "height": 1
+      }
+    },
+    {
+      "id": 4221638337307013,
+      "definition": {
+        "title": "",
+        "type": "manage_status",
+        "display_format": "countsAndList",
+        "color_preference": "text",
+        "hide_zero_counts": true,
+        "show_status": true,
+        "last_triggered_format": "relative",
+        "query": "NOT group_status:ok team:data-platform",
+        "sort": "triggered,desc",
+        "count": 50,
+        "start": 0,
+        "summary_type": "groups",
+        "show_priority": true,
+        "show_last_triggered": true
+      },
+      "layout": {
+        "x": 8,
+        "y": 1,
+        "width": 4,
+        "height": 3
+      }
+    },
+    {
+      "id": 185172985330904,
+      "definition": {
+        "title": "Jobs NOT OK",
+        "type": "query_value",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "q1",
+                "query": "sum:controlm.job.ended_not_ok.count{env:demo,service:controlm-sim,$ctm_job}.as_count()",
+                "aggregator": "sum"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "q1"
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": "<=",
+                "value": 0,
+                "palette": "white_on_green"
+              },
+              {
+                "comparator": ">",
+                "value": 0,
+                "palette": "white_on_yellow"
+              },
+              {
+                "comparator": ">",
+                "value": 2,
+                "palette": "white_on_red"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 4,
+        "y": 2,
+        "width": 2,
+        "height": 1
+      }
+    },
+    {
+      "id": 6970203436436452,
+      "definition": {
+        "title": "Nulos detectados (DQ)",
+        "type": "query_value",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "q1",
+                "query": "max:controlm.dq.actual_value{env:demo,service:controlm-sim,check_name:caso2_null_settlement_price}",
+                "aggregator": "max"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "q1"
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": "<=",
+                "value": 0,
+                "palette": "white_on_green"
+              },
+              {
+                "comparator": ">",
+                "value": 0,
+                "palette": "white_on_yellow"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 6,
+        "y": 2,
+        "width": 2,
+        "height": 1
+      }
+    },
+    {
+      "id": 7000656727575715,
+      "definition": {
+        "title": "DQ Failed",
+        "type": "query_value",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "q1",
+                "query": "sum:controlm.dq.check_failed{env:demo,service:controlm-sim}",
+                "aggregator": "sum"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "q1"
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": "<=",
+                "value": 0,
+                "palette": "white_on_green"
+              },
+              {
+                "comparator": ">",
+                "value": 0,
+                "palette": "white_on_red"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 4,
+        "y": 3,
+        "width": 2,
+        "height": 1
+      }
+    },
+    {
+      "id": 6929684536356645,
+      "definition": {
+        "title": "Soma 0 detectada (DQ)",
+        "type": "query_value",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "q1",
+                "query": "max:controlm.dq.actual_value{env:demo,service:controlm-sim,check_name:caso3_zero_sum_positions}",
+                "aggregator": "max"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "q1"
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": "<=",
+                "value": 0,
+                "palette": "white_on_green"
+              },
+              {
+                "comparator": ">",
+                "value": 0,
+                "palette": "white_on_red"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 6,
+        "y": 3,
+        "width": 2,
+        "height": 1
+      }
+    },
+    {
+      "id": 6853424072432950,
+      "definition": {
+        "title": "Job Duration",
+        "show_legend": true,
+        "legend_layout": "horizontal",
+        "legend_columns": [
+          "avg",
+          "min",
+          "max",
+          "value",
+          "sum"
+        ],
+        "type": "timeseries",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "q1",
+                "number_format": {
+                  "unit": {
+                    "type": "canonical_unit",
+                    "unit_name": "second"
+                  }
+                }
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "q1",
+                "query": "avg:controlm.job.duration_seconds{env:demo,service:controlm-sim,$ctm_job} by {ctm_job}"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "dog_classic",
+              "order_by": "values",
+              "line_type": "solid",
+              "line_width": "normal"
+            },
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 4,
+        "width": 12,
+        "height": 2
+      }
+    },
+    {
+      "id": 5218001689734064,
+      "definition": {
+        "title": "Job Runs — Status, Duration, Rows, Retries",
+        "title_size": "16",
+        "type": "query_table",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "ok",
+                "query": "sum:controlm.job.ended_ok.count{env:demo,service:controlm-sim,$ctm_job} by {ctm_job}.as_count()",
+                "aggregator": "sum"
+              },
+              {
+                "data_source": "metrics",
+                "name": "notok",
+                "query": "sum:controlm.job.ended_not_ok.count{env:demo,service:controlm-sim,$ctm_job} by {ctm_job}.as_count()",
+                "aggregator": "sum"
+              },
+              {
+                "data_source": "metrics",
+                "name": "dur",
+                "query": "avg:controlm.job.duration_seconds{env:demo,service:controlm-sim,$ctm_job} by {ctm_job}",
+                "aggregator": "avg"
+              },
+              {
+                "data_source": "metrics",
+                "name": "rows",
+                "query": "max:controlm.job.output_rows{env:demo,service:controlm-sim,$ctm_job} by {ctm_job}",
+                "aggregator": "last"
+              },
+              {
+                "data_source": "metrics",
+                "name": "retries",
+                "query": "max:controlm.job.retries{env:demo,service:controlm-sim,$ctm_job} by {ctm_job}",
+                "aggregator": "max"
+              }
+            ],
+            "response_format": "scalar",
+            "formulas": [
+              {
+                "formula": "ok",
+                "alias": "ENDED OK",
+                "conditional_formats": [
+                  {
+                    "comparator": ">",
+                    "value": 0,
+                    "palette": "white_on_green"
+                  }
+                ],
+                "cell_display_mode": "number"
+              },
+              {
+                "formula": "notok",
+                "alias": "ENDED NOT OK",
+                "conditional_formats": [
+                  {
+                    "comparator": ">",
+                    "value": 0,
+                    "palette": "white_on_red"
+                  }
+                ],
+                "cell_display_mode": "number"
+              },
+              {
+                "formula": "dur",
+                "alias": "AVG DURATION (s)",
+                "cell_display_mode": "number"
+              },
+              {
+                "formula": "rows",
+                "alias": "ROWS",
+                "cell_display_mode": "number"
+              },
+              {
+                "formula": "retries",
+                "alias": "MAX RETRIES",
+                "cell_display_mode": "number"
+              }
+            ]
+          }
+        ],
+        "has_search_bar": "auto"
+      },
+      "layout": {
+        "x": 0,
+        "y": 6,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "id": 8431484765377094,
+      "definition": {
+        "title": "Pipeline Runs — por Order Date",
+        "title_size": "16",
+        "type": "query_table",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "ok",
+                "query": "max:controlm.folder.ended_ok{env:demo,service:controlm-sim,$ctm_order_date} by {ctm_order_date}",
+                "aggregator": "last"
+              },
+              {
+                "data_source": "metrics",
+                "name": "notok",
+                "query": "max:controlm.folder.ended_not_ok{env:demo,service:controlm-sim,$ctm_order_date} by {ctm_order_date}",
+                "aggregator": "last"
+              },
+              {
+                "data_source": "metrics",
+                "name": "dur",
+                "query": "avg:controlm.folder.duration{env:demo,service:controlm-sim,$ctm_order_date} by {ctm_order_date}",
+                "aggregator": "last"
+              },
+              {
+                "data_source": "metrics",
+                "name": "jobs_ok",
+                "query": "max:controlm.folder.jobs.ok{env:demo,service:controlm-sim,$ctm_order_date} by {ctm_order_date}",
+                "aggregator": "max"
+              },
+              {
+                "data_source": "metrics",
+                "name": "jobs_notok",
+                "query": "max:controlm.folder.jobs.notok{env:demo,service:controlm-sim,$ctm_order_date} by {ctm_order_date}",
+                "aggregator": "max"
+              }
+            ],
+            "response_format": "scalar",
+            "formulas": [
+              {
+                "formula": "ok",
+                "alias": "OK",
+                "conditional_formats": [
+                  {
+                    "comparator": ">",
+                    "value": 0,
+                    "palette": "white_on_green"
+                  }
+                ],
+                "cell_display_mode": "number"
+              },
+              {
+                "formula": "notok",
+                "alias": "FAIL",
+                "conditional_formats": [
+                  {
+                    "comparator": ">",
+                    "value": 0,
+                    "palette": "white_on_red"
+                  }
+                ],
+                "cell_display_mode": "number"
+              },
+              {
+                "formula": "dur",
+                "alias": "DURATION (s)",
+                "cell_display_mode": "number"
+              },
+              {
+                "formula": "jobs_ok",
+                "alias": "JOBS OK",
+                "cell_display_mode": "number"
+              },
+              {
+                "formula": "jobs_notok",
+                "alias": "JOBS NOK",
+                "conditional_formats": [
+                  {
+                    "comparator": ">",
+                    "value": 0,
+                    "palette": "white_on_red"
+                  }
+                ],
+                "cell_display_mode": "number"
+              }
+            ]
+          }
+        ],
+        "has_search_bar": "auto"
+      },
+      "layout": {
+        "x": 6,
+        "y": 6,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "id": 5939720230210883,
+      "definition": {
+        "title": "Job Duration Over Time",
+        "show_legend": true,
+        "type": "timeseries",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "q1",
+                "query": "avg:controlm.job.duration_seconds{env:demo,service:controlm-sim,$ctm_job} by {ctm_job}"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "q1"
+              }
+            ],
+            "response_format": "timeseries",
+            "display_type": "bars"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 10,
+        "width": 4,
+        "height": 3
+      }
+    },
+    {
+      "id": 231425966296512,
+      "definition": {
+        "title": "Pipeline Duration Over Time",
+        "show_legend": true,
+        "type": "timeseries",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "q1",
+                "query": "avg:controlm.folder.duration{env:demo,service:controlm-sim,$ctm_order_date}"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "q1"
+              }
+            ],
+            "response_format": "timeseries",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 4,
+        "y": 10,
+        "width": 4,
+        "height": 3
+      }
+    },
+    {
+      "id": 6365568857777091,
+      "definition": {
+        "title": "Ended OK vs NOT OK",
+        "show_legend": true,
+        "type": "timeseries",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "ok",
+                "query": "sum:controlm.job.ended_ok.count{env:demo,service:controlm-sim,$ctm_job} by {ctm_job}.as_count()"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "ok",
+                "alias": "OK"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "green"
+            },
+            "display_type": "bars"
+          },
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "notok",
+                "query": "sum:controlm.job.ended_not_ok.count{env:demo,service:controlm-sim,$ctm_job} by {ctm_job}.as_count()"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "notok",
+                "alias": "NOT OK"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "red"
+            },
+            "display_type": "bars"
+          }
+        ]
+      },
+      "layout": {
+        "x": 8,
+        "y": 10,
+        "width": 4,
+        "height": 3
+      }
+    },
+    {
+      "id": 1669590896850458,
+      "definition": {
+        "title": "DQ Failures by Check",
+        "show_legend": true,
+        "type": "timeseries",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "q1",
+                "query": "max:controlm.dq.check_failed{env:demo,service:controlm-sim} by {check_name}"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "q1"
+              }
+            ],
+            "response_format": "timeseries",
+            "display_type": "bars"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 13,
+        "width": 4,
+        "height": 3
+      }
+    },
+    {
+      "id": 8956404322991470,
+      "definition": {
+        "title": "Job Duration vs SQL Server Query Time",
+        "show_legend": true,
+        "type": "timeseries",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "job",
+                "query": "avg:controlm.job.duration_seconds{env:demo,service:controlm-sim,$ctm_job} by {ctm_job}"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "job",
+                "alias": "CTM Duration (s)"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "green"
+            },
+            "display_type": "bars"
+          },
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "db",
+                "query": "avg:sqlserver.queries.duration.sum{db_instance:demopoc}"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "db / 1000000",
+                "alias": "SQL Server (ms)"
+              }
+            ],
+            "response_format": "timeseries",
+            "on_right_yaxis": true,
+            "style": {
+              "palette": "orange"
+            },
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 4,
+        "y": 13,
+        "width": 4,
+        "height": 3
+      }
+    },
+    {
+      "id": 5339805364287196,
+      "definition": {
+        "title": "SQL Server Reads vs Writes",
+        "show_legend": true,
+        "type": "timeseries",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "r",
+                "query": "avg:sqlserver.queries.logical_reads{db_instance:demopoc}"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "r",
+                "alias": "Reads"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "blue"
+            },
+            "display_type": "line"
+          },
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "w",
+                "query": "avg:sqlserver.queries.logical_writes{db_instance:demopoc}"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "w",
+                "alias": "Writes"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "red"
+            },
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 8,
+        "y": 13,
+        "width": 4,
+        "height": 3
+      }
+    },
+    {
+      "id": 3721891334108909,
+      "definition": {
+        "title": "DQ Check Details",
+        "type": "query_table",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "run",
+                "query": "max:controlm.dq.check_ran{env:demo,service:controlm-sim} by {check_name,target_table,severity}",
+                "aggregator": "last"
+              },
+              {
+                "data_source": "metrics",
+                "name": "fail",
+                "query": "max:controlm.dq.check_failed{env:demo,service:controlm-sim} by {check_name,target_table,severity}",
+                "aggregator": "last"
+              },
+              {
+                "data_source": "metrics",
+                "name": "val",
+                "query": "max:controlm.dq.actual_value{env:demo,service:controlm-sim} by {check_name,target_table,severity}",
+                "aggregator": "last"
+              }
+            ],
+            "response_format": "scalar",
+            "formulas": [
+              {
+                "formula": "run",
+                "alias": "RUN",
+                "cell_display_mode": "number"
+              },
+              {
+                "formula": "fail",
+                "alias": "FAILED",
+                "conditional_formats": [
+                  {
+                    "comparator": ">",
+                    "value": 0,
+                    "palette": "white_on_red"
+                  }
+                ],
+                "cell_display_mode": "number"
+              },
+              {
+                "formula": "val",
+                "alias": "VALUE",
+                "cell_display_mode": "number"
+              }
+            ]
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 16,
+        "width": 6,
+        "height": 3
+      }
+    },
+    {
+      "id": 2452308519955837,
+      "definition": {
+        "title": "Oracle vs SQL Server (Row Count Parity)",
+        "show_legend": true,
+        "type": "timeseries",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "trades",
+                "query": "max:controlm.dq.actual_value{env:demo,service:controlm-sim,check_name:rowcount_trades_oracle_vs_dw}"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "trades",
+                "alias": "Trades (Oracle=DW)"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "orange"
+            },
+            "display_type": "line"
+          },
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "positions",
+                "query": "max:controlm.dq.actual_value{env:demo,service:controlm-sim,check_name:rowcount_positions_oracle_vs_dw}"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "positions",
+                "alias": "Positions (Oracle=DW)"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "purple"
+            },
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 16,
+        "width": 3,
+        "height": 3
+      }
+    },
+    {
+      "id": 1876236084337831,
+      "definition": {
+        "title": "Oracle Physical I/O",
+        "show_legend": true,
+        "type": "timeseries",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "r",
+                "query": "avg:oracle.physical_reads{env:demo,service:controlm-sim}"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "r",
+                "alias": "Reads"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "orange"
+            },
+            "display_type": "area"
+          },
+          {
+            "queries": [
+              {
+                "data_source": "metrics",
+                "name": "w",
+                "query": "avg:oracle.physical_writes{env:demo,service:controlm-sim}"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "w",
+                "alias": "Writes"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "purple"
+            },
+            "display_type": "area"
+          }
+        ]
+      },
+      "layout": {
+        "x": 9,
+        "y": 16,
+        "width": 3,
+        "height": 3
+      }
+    },
+    {
+      "id": 1364569389306536,
+      "definition": {
+        "title": "Control-M Events Stream",
+        "requests": [
+          {
+            "query": {
+              "query_string": "sources:controlm OR tags:orchestrator:controlm",
+              "data_source": "event_stream",
+              "event_size": "s"
+            },
+            "columns": [],
+            "response_format": "event_list"
+          }
+        ],
+        "type": "list_stream"
+      },
+      "layout": {
+        "x": 0,
+        "y": 19,
+        "width": 12,
+        "height": 4
+      }
+    }
+  ],
+  "template_variables": [
+    {
+      "name": "ctm_job",
+      "prefix": "ctm_job",
+      "available_values": [
+        "close_market_eod",
+        "reconcile_d1_positions",
+        "quality_gate_d1",
+        "publish_d1_reports"
+      ],
+      "default": "*"
+    },
+    {
+      "name": "ctm_order_date",
+      "prefix": "ctm_order_date",
+      "available_values": [],
+      "default": "*"
+    }
+  ],
+  "layout_type": "ordered",
+  "notify_list": [],
+  "reflow_type": "fixed"
+}
