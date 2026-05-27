@@ -53,6 +53,16 @@ Datadog Agent
   Metrics + APM + Logs + DBM
 ```
 
+## Pipeline Jobs
+
+| Job | What It Does | Main Signal in the Demo |
+|---|---|---|
+| `market_data_ingest` | Generates and loads the market close source data into Oracle XE. It represents the upstream market data ingestion step before the D+1 batch starts. | Shows the first Python job, source data volume, and the beginning of the trace/log correlation. |
+| `close_market_eod` | Reads derivative trade movement data from Oracle (`ASTADRVT_TRADE_MVMT`) and loads the SQL Server DW trade table (`ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO`). | Shows Oracle-to-SQL Server ETL duration, row counts, retries, and failure handling. |
+| `reconcile_d1_positions` | Reconciles D+1 derivative and cash positions from Oracle (`ASTANO_*`, `ASTACASH_*`) into SQL Server position tables. | Shows the heavier batch step, longer duration, DBM queries, and where slow SQL or locking issues are visible. |
+| `quality_gate_d1` | Runs Data Quality checks on the DW outputs: duplicates, null settlement price, zero-sum positions, row-count parity, and overflow conditions. | Shows DQ metrics, `DQ Failed`, failed checks by type, and gate pass/fail behavior. |
+| `publish_d1_reports` | Publishes the curated SQL Server outputs to MinIO/S3 as report files for downstream consumers. | Shows the final export step, S3 publish failures, output rows, logs, and job completion status. |
+
 ## Services
 
 | Service | Purpose |
