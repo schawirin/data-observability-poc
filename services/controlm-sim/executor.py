@@ -45,6 +45,15 @@ logger = logging.getLogger("controlm-sim.executor")
 MAX_RETRIES = 2
 
 
+def _notify_progress(callback, event_type, **fields):
+    if not callback:
+        return
+    try:
+        callback({"event": event_type, **fields})
+    except Exception as exc:
+        logger.debug("progress callback failed: %s", exc)
+
+
 def _append_jsonl(path, record):
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -324,7 +333,7 @@ def execute_job(job_name, business_date, run_id=None, parent_run_id=None):
     }
 
 
-def execute_pipeline(business_date, inject_fault=None):
+def execute_pipeline(business_date, inject_fault=None, progress_callback=None):
     """Execute the full DAG in topological order.
 
     Optionally seeds Oracle with fault injection before running.
@@ -452,6 +461,14 @@ def execute_pipeline(business_date, inject_fault=None):
         job_run_id = str(uuid.uuid4())
 
         logger.info("Running job: %s", job_name)
+        _notify_progress(
+            progress_callback,
+            "job-start",
+            job_name=job_name,
+            run_id=job_run_id,
+            pipeline_run_id=pipeline_run_id,
+            business_date=business_date,
+        )
         outcome = execute_job(
             job_name=job_name,
             business_date=business_date,

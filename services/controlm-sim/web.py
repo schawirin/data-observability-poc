@@ -59,7 +59,15 @@ FAULT_OPTIONS = {
 def _run_pipeline_thread(business_date, inject_fault=None):
     """Run the full Oracle→SQL Server ETL pipeline in a background thread."""
     global _pipeline_state
-    _pipeline_state = {"status": "running", "result": None}
+    _pipeline_state = {
+        "status": "running",
+        "result": None,
+        "business_date": business_date,
+        "inject_fault": inject_fault,
+        "started_at": datetime.utcnow().isoformat() + "Z",
+        "active_job": None,
+        "jobs": {},
+    }
 
     try:
         fault_desc = FAULT_OPTIONS.get(inject_fault, "Nenhuma") if inject_fault else "Nenhuma"
@@ -99,6 +107,27 @@ def _run_pipeline_thread(business_date, inject_fault=None):
         import builtins
         original_print = builtins.print
 
+        def progress_update(event):
+            if event.get("event") != "job-start":
+                return
+            job = event.get("job_name")
+            if not job:
+                return
+            job_state = _pipeline_state.setdefault("jobs", {}).setdefault(job, {})
+            job_state.update({
+                "status": "running",
+                "start": datetime.utcnow().isoformat() + "Z",
+                "run_id": event.get("run_id"),
+            })
+            _pipeline_state["active_job"] = job
+            _broadcast(
+                "job-start",
+                f"[{job}] STARTED — executando no wrapper Python",
+                job=job,
+                run_id=event.get("run_id"),
+                pipeline_run_id=event.get("pipeline_run_id"),
+            )
+
         def intercepted_print(*args, **kwargs):
             original_print(*args, **kwargs)
             if args:
@@ -112,14 +141,48 @@ def _run_pipeline_thread(business_date, inject_fault=None):
                         rows = data.get("output_rows", "")
 
                         if status == "success":
+                            job_state = _pipeline_state.setdefault("jobs", {}).setdefault(job, {})
+                            job_state.update({
+                                "status": "success",
+                                "end": datetime.utcnow().isoformat() + "Z",
+                                "duration_seconds": duration,
+                                "retries": data.get("retries", 0),
+                                "sla_miss": data.get("sla_miss", False),
+                            })
+                            if _pipeline_state.get("active_job") == job:
+                                _pipeline_state["active_job"] = None
                             msg = f"[{job}] ENDED OK — {duration}s"
                             if rows:
                                 msg += f" ({rows} rows)"
-                            _broadcast("success", msg, job=job, job_status="ended_ok")
+                            _broadcast(
+                                "success", msg,
+                                job=job,
+                                job_status="success",
+                                finished=True,
+                                duration_seconds=duration,
+                                retries=data.get("retries", 0),
+                                sla_miss=data.get("sla_miss", False),
+                            )
                         elif status == "failed":
+                            job_state = _pipeline_state.setdefault("jobs", {}).setdefault(job, {})
+                            job_state.update({
+                                "status": "failed",
+                                "end": datetime.utcnow().isoformat() + "Z",
+                                "duration_seconds": duration,
+                                "retries": data.get("retries", 0),
+                                "sla_miss": data.get("sla_miss", False),
+                                "error": data.get("error", ""),
+                            })
+                            if _pipeline_state.get("active_job") == job:
+                                _pipeline_state["active_job"] = None
                             _broadcast("error",
                                 f"[{job}] ENDED NOT OK — {data.get('error', '')[:200]}",
-                                job=job, job_status="ended_not_ok")
+                                job=job,
+                                job_status="failed",
+                                finished=True,
+                                duration_seconds=duration,
+                                retries=data.get("retries", 0),
+                                sla_miss=data.get("sla_miss", False))
                         elif status == "retry":
                             _broadcast("warn",
                                 f"[{job}] RETRY #{data.get('retries', '?')} — {data.get('error', '')[:100]}",
@@ -130,7 +193,11 @@ def _run_pipeline_thread(business_date, inject_fault=None):
         builtins.print = intercepted_print
 
         try:
-            summary = execute_pipeline(business_date, inject_fault=oracle_fault)
+            summary = execute_pipeline(
+                business_date,
+                inject_fault=oracle_fault,
+                progress_callback=progress_update,
+            )
         finally:
             builtins.print = original_print
             # Clean up fault env vars

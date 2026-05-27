@@ -166,6 +166,15 @@
   .badge-ok    { background: var(--st-ok-bg); color: var(--st-ok); border-color: var(--st-ok); }
   .badge-fail  { background: var(--st-fail-bg); color: var(--st-fail); border-color: var(--st-fail); }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.6} }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes livePulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(46,158,63,0.44), 0 0 20px rgba(46,158,63,0.12); }
+    50% { box-shadow: 0 0 0 8px rgba(46,158,63,0), 0 0 26px rgba(46,158,63,0.26); }
+  }
+  @keyframes progressSweep {
+    0% { transform: translateX(-120%); }
+    100% { transform: translateX(260%); }
+  }
 
   /* ── ACTION TOOLBAR (Control-M EM ribbon) ────────────────────── */
   .ctm-toolbar {
@@ -303,6 +312,10 @@
   }
   .step-item:hover { background: var(--row-hover); }
   .step-item.selected { background: var(--row-sel); border-left-color: var(--accent); }
+  .step-item.running {
+    background: rgba(46,158,63,0.08);
+    border-left-color: var(--st-ok);
+  }
   .step-status-icon {
     width: 18px; height: 18px;
     flex-shrink: 0;
@@ -365,6 +378,205 @@
   .view-tabs-right { margin-left: auto; display: flex; align-items: center; gap: 8px; padding-right: 4px; }
   .view-mini-info { font-size: 11px; color: var(--text-dim); }
 
+  /* ── LIVE RUN STRIP (GitHub Actions-style activity) ───────────── */
+  .run-activity {
+    flex-shrink: 0;
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    padding: 10px 14px;
+    background: linear-gradient(180deg, rgba(36,52,71,0.98), rgba(31,45,63,0.98));
+    border-bottom: 1px solid var(--border);
+  }
+  .run-orb {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    position: relative;
+    flex: 0 0 auto;
+    background: rgba(107,124,144,0.10);
+    border: 1px solid var(--border-strong);
+  }
+  .run-orb::before,
+  .run-orb::after {
+    content: "";
+    position: absolute;
+    border-radius: 50%;
+  }
+  .run-orb::before {
+    inset: 5px;
+    border: 2px solid rgba(107,124,144,0.25);
+    border-top-color: var(--text-dim);
+  }
+  .run-orb::after {
+    width: 9px;
+    height: 9px;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--text-dim);
+  }
+  .run-activity.is-running .run-orb {
+    background: rgba(46,158,63,0.13);
+    border-color: rgba(46,158,63,0.7);
+    animation: livePulse 1.45s ease-in-out infinite;
+  }
+  .run-activity.is-running .run-orb::before {
+    border-color: rgba(46,158,63,0.16);
+    border-top-color: var(--st-ok);
+    animation: spin 0.9s linear infinite;
+  }
+  .run-activity.is-running .run-orb::after {
+    background: var(--st-ok);
+    box-shadow: 0 0 12px rgba(46,158,63,0.75);
+  }
+  .run-activity.is-ok .run-orb {
+    background: var(--st-ok-bg);
+    border-color: var(--st-ok);
+  }
+  .run-activity.is-ok .run-orb::before {
+    inset: 13px 10px 12px 11px;
+    width: 16px;
+    height: 9px;
+    border: 0;
+    border-left: 3px solid var(--st-ok);
+    border-bottom: 3px solid var(--st-ok);
+    border-radius: 0;
+    transform: rotate(-45deg);
+  }
+  .run-activity.is-ok .run-orb::after { display: none; }
+  .run-activity.is-fail .run-orb {
+    background: var(--st-fail-bg);
+    border-color: var(--st-fail);
+  }
+  .run-activity.is-fail .run-orb::before,
+  .run-activity.is-fail .run-orb::after {
+    width: 18px;
+    height: 3px;
+    left: 11px;
+    top: 19px;
+    background: var(--st-fail);
+    border: 0;
+  }
+  .run-activity.is-fail .run-orb::before { transform: rotate(45deg); }
+  .run-activity.is-fail .run-orb::after { transform: rotate(-45deg); }
+  .run-activity-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .run-activity-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .run-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: 0.2px;
+  }
+  .run-subtitle {
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .run-percent {
+    min-width: 54px;
+    text-align: right;
+    font-family: "SF Mono", "Fira Code", Menlo, monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 700;
+  }
+  .run-progress {
+    height: 7px;
+    border-radius: 99px;
+    overflow: hidden;
+    background: rgba(13,34,56,0.8);
+    border: 1px solid var(--border-soft);
+    position: relative;
+  }
+  .run-progress-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #2E9E3F, #6EE67C);
+    transition: width 0.35s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .run-activity.is-running .run-progress-fill::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    width: 38%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.34), transparent);
+    animation: progressSweep 1.4s ease-in-out infinite;
+  }
+  .run-activity.is-fail .run-progress-fill { background: linear-gradient(90deg, #D63841, #FF7A81); }
+  .run-step-rail {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 6px;
+  }
+  .run-step {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-soft);
+    border-radius: 4px;
+    background: rgba(13,34,56,0.45);
+  }
+  .run-step.is-running {
+    border-color: rgba(46,158,63,0.75);
+    background: rgba(46,158,63,0.10);
+  }
+  .run-step.is-ok {
+    border-color: rgba(46,158,63,0.45);
+    background: rgba(46,158,63,0.08);
+  }
+  .run-step.is-fail {
+    border-color: rgba(214,56,65,0.65);
+    background: rgba(214,56,65,0.10);
+  }
+  .run-step-icon {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    border: 1px solid var(--st-wait);
+    color: var(--st-wait);
+    font-size: 10px;
+    font-weight: 900;
+  }
+  .run-step.is-running .run-step-icon {
+    border: 2px solid rgba(46,158,63,0.24);
+    border-top-color: var(--st-ok);
+    animation: spin 0.8s linear infinite;
+    color: transparent;
+  }
+  .run-step.is-ok .run-step-icon {
+    border-color: var(--st-ok);
+    color: var(--st-ok);
+    background: var(--st-ok-bg);
+  }
+  .run-step.is-fail .run-step-icon {
+    border-color: var(--st-fail);
+    color: var(--st-fail);
+    background: var(--st-fail-bg);
+  }
+  .run-step-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .run-step-meta {
+    margin-left: auto;
+    color: var(--text-dim);
+    font-family: "SF Mono", "Fira Code", Menlo, monospace;
+    font-size: 10px;
+  }
+
   /* ── VIEW PANES ──────────────────────────────────────────────── */
   .view-pane { flex: 1; overflow: hidden; display: none; flex-direction: column; }
   .view-pane.active { display: flex; }
@@ -395,11 +607,28 @@
   .monitor-table tbody tr { border-bottom: 1px solid var(--border-soft); cursor: pointer; transition: background 0.1s; }
   .monitor-table tbody tr:hover { background: var(--row-hover); }
   .monitor-table tbody tr.selected-row { background: var(--row-sel); box-shadow: inset 3px 0 0 var(--accent); }
+  .monitor-table tbody tr.row-running {
+    background: rgba(46,158,63,0.055);
+    box-shadow: inset 3px 0 0 var(--st-ok);
+  }
+  .monitor-table tbody tr.row-fail {
+    background: rgba(214,56,65,0.055);
+    box-shadow: inset 3px 0 0 var(--st-fail);
+  }
   .monitor-table td { padding: 9px 12px; white-space: nowrap; border-right: 1px solid var(--border-soft); }
   .monitor-table td:last-child { border-right: none; }
   .order-id { font-family: "SF Mono", "Fira Code", monospace; font-size: 11px; color: var(--accent-bright); font-weight: 700; }
-  .job-name-cell { font-weight: 600; font-size: 12px; }
+  .job-name-cell { font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px; min-width: 0; }
   .job-dep  { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+  .job-live-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 2px solid rgba(46,158,63,0.22);
+    border-top-color: var(--st-ok);
+    flex: 0 0 auto;
+    animation: spin 0.8s linear infinite;
+  }
 
   /* Status chips Control-M-style */
   .chip {
@@ -941,8 +1170,25 @@
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="3" cy="8" r="2"/><circle cx="13" cy="4" r="2"/><circle cx="13" cy="12" r="2"/><line x1="5" y1="8" x2="11" y2="4"/><line x1="5" y1="8" x2="11" y2="12"/></svg>
         Network
       </button>
-      <div class="view-tabs-right">
-        <span class="view-mini-info" id="viewMiniInfo">— jobs · — running · — completed</span>
+    <div class="view-tabs-right">
+      <span class="view-mini-info" id="viewMiniInfo">— jobs · — running · — completed</span>
+    </div>
+  </div>
+
+    <div class="run-activity is-idle" id="runActivity">
+      <div class="run-orb" aria-hidden="true"></div>
+      <div class="run-activity-body">
+        <div class="run-activity-head">
+          <div>
+            <div class="run-title" id="runTitle">Pipeline pronta para execução</div>
+            <div class="run-subtitle" id="runSubtitle">Clique em Order &amp; Run para acompanhar cada job em tempo real.</div>
+          </div>
+          <div class="run-percent" id="runPercent">0%</div>
+        </div>
+        <div class="run-progress">
+          <div class="run-progress-fill" id="runProgressFill"></div>
+        </div>
+        <div class="run-step-rail" id="runStepRail"></div>
       </div>
     </div>
 
@@ -1201,6 +1447,12 @@ const STATUS_LABEL = {
   'ENDED NOT OK':'ENDED NOT OK',
   'HELD':'HELD',
 };
+const EXPECTED_JOB_SECONDS = {
+  close_market_eod: 60,
+  reconcile_d1_positions: 120,
+  quality_gate_d1: 30,
+  publish_d1_reports: 60,
+};
 
 /* ════════════════════════════════════════════════════════════════
    INIT
@@ -1212,7 +1464,7 @@ updateSubOdate();
 function initJobs() {
   jobs = {};
   JOB_DEFS.forEach(j => {
-    if (!jobs[j.id]) jobs[j.id] = { status:'WAITING', start:null, end:null, retries:0, sla_miss:false, fault:null, result:null };
+    if (!jobs[j.id]) jobs[j.id] = { status:'WAITING', start:null, end:null, startMs:null, endMs:null, retries:0, sla_miss:false, fault:null, result:null };
   });
   renderStepList();
   renderMonitorTable();
@@ -1236,7 +1488,7 @@ function loadCatalog(preserveStatus = false) {
     if (preserveStatus) {
       // ensure new jobs get a default status entry without wiping running state
       JOB_DEFS.forEach(j => {
-        if (!jobs[j.id]) jobs[j.id] = { status:'WAITING', start:null, end:null, retries:0, sla_miss:false };
+        if (!jobs[j.id]) jobs[j.id] = { status:'WAITING', start:null, end:null, startMs:null, endMs:null, retries:0, sla_miss:false };
       });
       renderStepList(); renderMonitorTable(); refreshNetwork(); updateCounts();
     } else {
@@ -1246,11 +1498,52 @@ function loadCatalog(preserveStatus = false) {
   }).catch(err => log('error', `[CTM] Falha ao carregar catalog: ${err}`));
 }
 
-loadCatalog();
+loadCatalog().then(hydrateStatus);
 connectSSE();
 
 function updateSubOdate() {
   document.getElementById('subOdate').textContent = document.getElementById('businessDate').value || '—';
+}
+
+function hydrateStatus() {
+  fetch('/api/status')
+    .then(r => r.json())
+    .then(data => {
+      if (data.business_date) {
+        document.getElementById('businessDate').value = data.business_date;
+        updateSubOdate();
+      }
+      if (data.status === 'running') {
+        pipelineRunning = true;
+        pipelineStart = data.started_at ? (Date.parse(data.started_at) || Date.now()) : Date.now();
+        setBadge('run', 'Running');
+        document.getElementById('btnStart').disabled = true;
+        Object.entries(data.jobs || {}).forEach(([jobId, st]) => {
+          const uiStatus = st.status === 'success'
+            ? 'ENDED OK'
+            : st.status === 'failed'
+              ? 'ENDED NOT OK'
+              : st.status === 'running'
+                ? 'RUNNING'
+                : 'WAITING';
+          updateJobStatus(
+            jobId,
+            uiStatus,
+            st.start || null,
+            st.end || null,
+            st.retries || 0,
+            st.sla_miss || false,
+            st.duration_seconds,
+            st.result
+          );
+        });
+        startRuntimeTicker();
+        renderRunActivity();
+      } else if (data.result && data.result.jobs) {
+        applyPipelineResult(data.result, data.status === 'success');
+      }
+    })
+    .catch(() => {});
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -1270,7 +1563,9 @@ function renderStepList() {
   JOB_DEFS.forEach(j => {
     const st = jobs[j.id] || {};
     const li = document.createElement('li');
-    li.className = 'step-item' + (selectedJob === j.id ? ' selected' : '');
+    li.className = 'step-item'
+      + (selectedJob === j.id ? ' selected' : '')
+      + (st.status === 'RUNNING' ? ' running' : '');
     const editBtn = !j.builtin
       ? `<button class="step-action-btn" title="Edit" onclick="event.stopPropagation(); openJobModal('${j.id}')">✎</button>
          <button class="step-action-btn delete" title="Delete" onclick="event.stopPropagation(); deleteJob('${j.id}')">🗑</button>`
@@ -1318,12 +1613,16 @@ function renderMonitorTable() {
 
     const orderId = `0000${(234+idx).toString().padStart(3,'0')}`;
 
+    const liveDot = st.status === 'RUNNING' ? '<span class="job-live-dot" title="Executando"></span>' : '';
+    const rowState = st.status === 'RUNNING'
+      ? ' row-running'
+      : (st.status === 'ENDED NOT OK' ? ' row-fail' : '');
     const tr = document.createElement('tr');
-    tr.className = selectedJob === j.id ? 'selected-row' : '';
+    tr.className = (selectedJob === j.id ? 'selected-row' : '') + rowState;
     tr.innerHTML = `
       <td class="order-id">${orderId}</td>
       <td>
-        <div class="job-name-cell">${j.label}${fault ? `<span class="fault-tag">${fault}</span>` : ''}</div>
+        <div class="job-name-cell">${liveDot}<span>${j.label}</span>${fault ? `<span class="fault-tag">${fault}</span>` : ''}</div>
         <div class="job-dep">${j.dep ? '↳ depends: '+j.dep : '─ pipeline start'}</div>
       </td>
       <td>${statusChip}</td>
@@ -1831,14 +2130,15 @@ function startPipeline() {
   if (!bd) { alert('Select business date.'); return; }
 
   pipelineRunning = true;
-  initJobs();
   pipelineStart = Date.now();
+  initJobs();
   startRuntimeTicker();
 
   document.getElementById('btnStart').disabled = true;
   document.getElementById('dqPanel').classList.remove('visible');
   document.getElementById('filesPanel').classList.remove('visible');
   setBadge('run', 'Running');
+  renderRunActivity();
 
   fetch('/api/run', {
     method:'POST',
@@ -1856,6 +2156,7 @@ function startRuntimeTicker() {
     if (!pipelineStart) return;
     const sec = Math.floor((Date.now() - pipelineStart) / 1000);
     document.getElementById('subRuntime').textContent = `${sec}s`;
+    renderRunActivity();
   }, 1000);
 }
 function stopRuntimeTicker() {
@@ -1867,6 +2168,7 @@ function resetUI() {
   setBadge('idle', 'Idle');
   pipelineRunning = false;
   stopRuntimeTicker();
+  renderRunActivity();
 }
 
 function resetJobs() {
@@ -1878,6 +2180,7 @@ function resetJobs() {
   stopRuntimeTicker();
   pipelineStart = null;
   if (cy) initNetwork();
+  renderRunActivity();
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -1901,8 +2204,11 @@ function handleSSE(data) {
     updateJobStatus(data.job, 'RUNNING', data.timestamp, null, 0, false);
   }
   if ((data.type === 'success' || data.type === 'info') && data.job && data.finished) {
-    const ok = data.job_status === 'success';
+    const ok = data.job_status === 'success' || data.job_status === 'ended_ok';
     updateJobStatus(data.job, ok ? 'ENDED OK' : 'ENDED NOT OK', null, data.timestamp, data.retries||0, data.sla_miss||false, data.duration_seconds, data.result);
+  }
+  if (data.type === 'error' && data.job && data.finished) {
+    updateJobStatus(data.job, 'ENDED NOT OK', null, data.timestamp, data.retries||0, data.sla_miss||false, data.duration_seconds, data.result);
   }
 
   if (data.type === 'pipeline-complete') {
@@ -1924,10 +2230,16 @@ function handleSSE(data) {
 }
 
 function updateJobStatus(jobId, status, start, end, retries, sla_miss, duration, result) {
-  if (!jobs[jobId]) jobs[jobId] = { status:'WAITING', start:null, end:null, retries:0, sla_miss:false };
+  if (!jobs[jobId]) jobs[jobId] = { status:'WAITING', start:null, end:null, startMs:null, endMs:null, retries:0, sla_miss:false };
   if (status) jobs[jobId].status = status;
+  if (start) jobs[jobId].startMs = timestampMs(start) || jobs[jobId].startMs;
+  if (status === 'RUNNING' && !jobs[jobId].startMs) jobs[jobId].startMs = Date.now();
+  if (status === 'RUNNING' && !jobs[jobId].start) jobs[jobId].start = fmtTime(start) || new Date().toTimeString().slice(0,8);
   if (start)  jobs[jobId].start  = fmtTime(start);
-  if (end)    jobs[jobId].end    = fmtTime(end);
+  if (end) {
+    jobs[jobId].end = fmtTime(end);
+    jobs[jobId].endMs = timestampMs(end) || Date.now();
+  }
   if (retries != null) jobs[jobId].retries = retries;
   if (sla_miss != null) jobs[jobId].sla_miss = sla_miss;
   if (duration != null) jobs[jobId].duration = duration;
@@ -2051,24 +2363,147 @@ function filterConsole() {
 }
 
 /* ════════════════════════════════════════════════════════════════
+   LIVE RUN ACTIVITY STRIP
+   ════════════════════════════════════════════════════════════════ */
+
+function getJobStats() {
+  let ok=0, exec=0, wait=0, fail=0, held=0;
+  JOB_DEFS.forEach(def => {
+    const st = jobs[def.id] || {};
+    if (st.status === 'ENDED OK') ok++;
+    else if (st.status === 'RUNNING') exec++;
+    else if (st.status === 'ENDED NOT OK') fail++;
+    else if (st.status === 'HELD') held++;
+    else wait++;
+  });
+  return { ok, exec, wait, fail, held, total: JOB_DEFS.length };
+}
+
+function getRunningJobDef() {
+  return JOB_DEFS.find(def => (jobs[def.id] || {}).status === 'RUNNING') || null;
+}
+
+function formatElapsed(totalSeconds) {
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '0s';
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes ? `${minutes}m ${seconds.toString().padStart(2, '0')}s` : `${seconds}s`;
+}
+
+function expectedSeconds(def) {
+  if (!def) return 60;
+  return EXPECTED_JOB_SECONDS[def.id] || Math.max(30, Math.min(def.sla || 60, 180));
+}
+
+function runElapsedSeconds() {
+  return pipelineStart ? Math.floor((Date.now() - pipelineStart) / 1000) : 0;
+}
+
+function jobElapsedSeconds(def) {
+  const st = def ? (jobs[def.id] || {}) : {};
+  return st.startMs ? Math.max(0, Math.floor((Date.now() - st.startMs) / 1000)) : 0;
+}
+
+function calculateRunProgress(stats, runningDef) {
+  if (!stats.total) return 0;
+  if (!pipelineRunning && (stats.ok + stats.fail + stats.held) === stats.total && stats.total > 0) return 100;
+
+  const completed = stats.ok + stats.fail + stats.held;
+  let progress = completed / stats.total;
+  if (runningDef) {
+    const elapsed = jobElapsedSeconds(runningDef);
+    const fraction = Math.min(0.88, elapsed / expectedSeconds(runningDef));
+    progress += fraction / stats.total;
+  } else if (pipelineRunning) {
+    progress += 0.08 / stats.total;
+  }
+  return Math.max(pipelineRunning ? 3 : 0, Math.min(99, Math.round(progress * 100)));
+}
+
+function renderRunActivity() {
+  const activity = document.getElementById('runActivity');
+  if (!activity) return;
+
+  const stats = getJobStats();
+  const runningDef = getRunningJobDef();
+  const progress = calculateRunProgress(stats, runningDef);
+
+  let state = 'idle';
+  if (pipelineRunning) state = 'running';
+  else if (stats.fail > 0) state = 'fail';
+  else if (stats.total && stats.ok === stats.total) state = 'ok';
+
+  activity.className = `run-activity is-${state}`;
+  document.getElementById('runProgressFill').style.width = `${progress}%`;
+  document.getElementById('runPercent').textContent = `${progress}%`;
+
+  const elapsed = formatElapsed(runElapsedSeconds());
+  const runningLabel = runningDef ? runningDef.label : null;
+  if (pipelineRunning) {
+    document.getElementById('runTitle').textContent = `Pipeline rodando · ${elapsed}`;
+    document.getElementById('runSubtitle').textContent = runningLabel
+      ? `Executando ${runningLabel} · ${formatElapsed(jobElapsedSeconds(runningDef))} neste job`
+      : 'Inicializando execução e aguardando o próximo job.';
+  } else if (state === 'ok') {
+    document.getElementById('runTitle').textContent = 'Pipeline finalizada com sucesso';
+    document.getElementById('runSubtitle').textContent = `${stats.ok}/${stats.total} jobs ENDED OK.`;
+  } else if (state === 'fail') {
+    document.getElementById('runTitle').textContent = 'Pipeline terminou com falha';
+    document.getElementById('runSubtitle').textContent = `${stats.fail} job(s) ENDED NOT OK. Use Sysout, Logs e APM para diagnosticar.`;
+  } else {
+    document.getElementById('runTitle').textContent = 'Pipeline pronta para execução';
+    document.getElementById('runSubtitle').textContent = 'Clique em Order & Run para acompanhar cada job em tempo real.';
+  }
+
+  const rail = document.getElementById('runStepRail');
+  rail.innerHTML = JOB_DEFS.map(def => {
+    const st = jobs[def.id] || {};
+    const status = st.status || 'WAITING';
+    const cls = status === 'RUNNING'
+      ? 'is-running'
+      : status === 'ENDED OK'
+        ? 'is-ok'
+        : status === 'ENDED NOT OK'
+          ? 'is-fail'
+          : status === 'HELD'
+            ? 'is-held'
+            : 'is-wait';
+    const icon = status === 'RUNNING'
+      ? ''
+      : status === 'ENDED OK'
+        ? '✓'
+        : status === 'ENDED NOT OK'
+          ? '✕'
+          : status === 'HELD'
+            ? 'Ⅱ'
+            : '';
+    const meta = status === 'RUNNING'
+      ? formatElapsed(jobElapsedSeconds(def))
+      : st.duration != null
+        ? `${st.duration}s`
+        : STATUS_LABEL[status] || status;
+    return `
+      <div class="run-step ${cls}" title="${escHtml(def.label)} · ${escHtml(STATUS_LABEL[status] || status)}">
+        <span class="run-step-icon">${icon}</span>
+        <span class="run-step-name">${escHtml(def.label)}</span>
+        <span class="run-step-meta">${escHtml(meta)}</span>
+      </div>`;
+  }).join('');
+}
+
+/* ════════════════════════════════════════════════════════════════
    STATUS BAR COUNTS
    ════════════════════════════════════════════════════════════════ */
 
 function updateCounts() {
-  let ok=0, exec=0, wait=0, fail=0, held=0;
-  Object.values(jobs).forEach(j => {
-    if (j.status === 'ENDED OK') ok++;
-    else if (j.status === 'RUNNING') exec++;
-    else if (j.status === 'ENDED NOT OK') fail++;
-    else if (j.status === 'HELD') held++;
-    else wait++;
-  });
+  const { ok, exec, wait, fail, held, total } = getJobStats();
   document.getElementById('sbOk').textContent   = ok;
   document.getElementById('sbExec').textContent = exec;
   document.getElementById('sbWait').textContent = wait;
   document.getElementById('sbFail').textContent = fail + (held ? ` (${held} held)` : '');
 
-  document.getElementById('viewMiniInfo').textContent = `${JOB_DEFS.length} jobs · ${exec} executing · ${ok} completed${fail ? ' · '+fail+' failed' : ''}`;
+  document.getElementById('viewMiniInfo').textContent = `${total} jobs · ${exec} executing · ${ok} completed${fail ? ' · '+fail+' failed' : ''}`;
+  renderRunActivity();
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -2081,9 +2516,26 @@ function setBadge(type, text) {
   el.textContent = text;
 }
 
+function timestampMs(value) {
+  if (!value) return null;
+  if (/^\d{2}:\d{2}:\d{2}$/.test(value)) {
+    const [h, m, s] = value.split(':').map(Number);
+    const d = new Date();
+    d.setHours(h, m, s, 0);
+    return d.getTime();
+  }
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 function fmtTime(iso) {
   if (!iso) return null;
-  try { return new Date(iso).toTimeString().slice(0,8); }
+  if (/^\d{2}:\d{2}:\d{2}$/.test(iso)) return iso;
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toTimeString().slice(0,8);
+  }
   catch { return iso; }
 }
 
