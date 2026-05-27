@@ -1,3 +1,543 @@
+# POC B3 de Observabilidade para Control-M
+
+Prova de conceito de uma pipeline batch D+1 no estilo B3, orquestrada por um wrapper similar ao Control-M e observada com Datadog.
+
+O objetivo da demo é diagnóstico operacional: a partir de um dashboard, identificar se a pipeline rodou, qual job falhou, quanto tempo levou, qual banco/query esteve envolvido e quais logs pertencem ao mesmo trace Python.
+
+## O Que Esta Demo Mostra
+
+- Orquestração de jobs estilo Control-M em Python.
+- Tabelas fonte Oracle (`ASTA*`) carregadas em tabelas DW SQL Server (`ADWPM*`).
+- Validações de Data Quality para trades duplicados, preço de liquidação nulo, posições com soma zero e paridade de contagem de linhas.
+- Exportação para MinIO compatível com S3.
+- Telemetria Datadog gerada pelo wrapper dos jobs:
+  - Métricas Control-M via DogStatsD.
+  - Traces APM dos jobs Python.
+  - Logs estruturados correlacionados com traces via `dd.trace_id` e `dd.span_id`.
+  - DBM para Oracle, SQL Server, MySQL e PostgreSQL.
+  - Coleta de logs em arquivo das execuções Control-M e dos bancos.
+
+Os emissores OpenLineage continuam no repositório, mas o caminho principal da demo foca em métricas, APM, logs e DBM porque estes sinais são mais previsíveis para uma demonstração curta.
+
+## Arquitetura
+
+```text
+Gerador de dados de mercado
+        |
+        v
+Tabelas fonte Oracle XE
+  XEPDB1.DEMOPOC.ASTADRVT_TRADE_MVMT
+  XEPDB1.DEMOPOC.ASTANO_FGBE_DRVT_PSTN
+  XEPDB1.DEMOPOC.ASTACASH_MRKT_PSTN
+        |
+        v
+Simulador Control-M / wrapper Python
+  market_data_ingest
+  close_market_eod
+  reconcile_d1_positions
+  quality_gate_d1
+  publish_d1_reports
+        |
+        v
+Tabelas DW SQL Server
+  demopoc.dbo.ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO
+  demopoc.dbo.ADWPM_POSICAO_DERIVATIVO_NAO_FUNGIVEL
+  demopoc.dbo.ADWPM_POSICAO_MERCADO_A_VISTA
+  demopoc.dbo.ADWPM_DQ_RESULTS
+        |
+        v
+Exports MinIO / S3
+        |
+        v
+Datadog Agent
+  Métricas + APM + Logs + DBM
+```
+
+## Jobs da Pipeline
+
+| Job | O Que Faz | Principal Sinal na Demo |
+|---|---|---|
+| `market_data_ingest` | Gera e carrega os dados fonte de fechamento de mercado no Oracle XE. Representa a ingestão upstream antes do batch D+1. | Mostra o primeiro job Python, volume de dados fonte e início da correlação entre trace e logs. |
+| `close_market_eod` | Lê movimentos de trades derivativos no Oracle (`ASTADRVT_TRADE_MVMT`) e carrega a tabela DW SQL Server (`ADWPM_MOVIMENTO_NEGOCIO_DERIVATIVO`). | Mostra duração do ETL Oracle para SQL Server, contagem de linhas, retries e tratamento de falha. |
+| `reconcile_d1_positions` | Reconcilia posições D+1 derivativas e cash do Oracle (`ASTANO_*`, `ASTACASH_*`) para tabelas de posição no SQL Server. | Mostra a etapa mais pesada do batch, maior duração, queries no DBM e cenários de SQL lento ou lock. |
+| `quality_gate_d1` | Executa checagens de Data Quality nos outputs DW: duplicidade, nulos, soma zero, paridade de linhas e overflow. | Mostra métricas de DQ, `DQ Failed`, falhas por tipo de check e comportamento de gate pass/fail. |
+| `publish_d1_reports` | Publica os outputs curados do SQL Server no MinIO/S3 como arquivos de relatório para consumidores downstream. | Mostra a etapa final de exportação, falhas de S3, linhas de output, logs e status de conclusão. |
+
+## Serviços
+
+| Serviço | Papel |
+|---|---|
+| `demo-controlm-sim` | UI estilo Control-M, wrapper Python, métricas, traces e logs |
+| `demo-datadog-agent` | Datadog Agent com APM, DogStatsD, logs e DBM |
+| `demo-oracle` | Banco fonte Oracle XE |
+| `demo-sqlserver` | Banco destino SQL Server DW |
+| `demo-minio` | Destino de exportação compatível com S3 |
+| `demo-market-mock` | Gerador de dados de mercado e injeção de falhas |
+| `demo-cron` | Rotacionador opcional de cenários para manter o Datadog populado |
+| `demo-mysql` / `demo-postgres` | Exemplos auxiliares para DBM |
+| `demo-controlm-workbench` | Perfil opcional do BMC Control-M Workbench |
+
+## Pré-requisitos
+
+- Podman Desktop ou Podman machine.
+- 8 GB ou mais de RAM alocados para a VM de containers.
+- `make`.
+- API key do Datadog.
+- Application key do Datadog se quiser atualizar dashboards via API ou Terraform.
+
+## Ambiente Datadog
+
+Crie o arquivo `.env` a partir do template:
+
+```bash
+cp .env.example .env
+```
+
+Edite o `.env`:
+
+```bash
+DD_API_KEY=<your_datadog_api_key>
+DD_APP_KEY=<your_datadog_application_key>
+DD_SITE=datadoghq.com
+MYSQL_ROOT_PASSWORD=demopoc2026
+```
+
+`DD_API_KEY` é obrigatória para o Agent enviar métricas, logs, traces, eventos e telemetria DBM.
+
+`DD_APP_KEY` não é obrigatória para ingestão, mas é recomendada nesta POC porque os scripts auxiliares podem atualizar dashboards e consultar APIs do Datadog.
+
+Nunca commite `.env`. O arquivo está ignorado no `.gitignore`.
+
+## Subida Rápida
+
+```bash
+git clone https://github.com/schawirin/data-observability-poc.git
+cd data-observability-poc
+
+cp .env.example .env
+# edite .env com DD_API_KEY, DD_APP_KEY e DD_SITE
+
+podman compose up -d --build
+podman compose ps
+```
+
+Target equivalente no Makefile:
+
+```bash
+make up
+make status
+```
+
+URLs locais úteis:
+
+| UI | URL |
+|---|---|
+| Simulador Control-M | http://localhost:5000 |
+| Console MinIO | http://localhost:9001 |
+| Adminer | http://localhost:8080 |
+| Control-M Workbench opcional | https://localhost:8443 |
+
+Credenciais do MinIO:
+
+```text
+minioadmin / minioadmin
+```
+
+## Validar o Datadog Agent
+
+```bash
+make dd-agent-status
+```
+
+Procure por:
+
+- `APM Agent: Running`
+- `DogStatsD`
+- `Logs Agent`
+- Checks DBM para SQL Server, Oracle, MySQL e PostgreSQL
+
+Também é possível enviar uma amostra simples:
+
+```bash
+make dd-smoke
+```
+
+## Rodar a Demo
+
+Para gravar um vídeo curto, desative o padding artificial dos jobs:
+
+```bash
+podman exec -e JOB_PADDING_FACTOR=0 demo-controlm-sim \
+  python main.py run-pipeline --business-date $(date +%F)
+```
+
+Para uma execução mais parecida com produção, com jobs mais longos, omita `JOB_PADDING_FACTOR=0`:
+
+```bash
+make run-d1 BUSINESS_DATE=$(date +%F)
+```
+
+## Rodar uma Falha de Data Quality
+
+Injete todas as falhas de Data Quality em uma única execução:
+
+```bash
+podman exec -e JOB_PADDING_FACTOR=0 demo-controlm-sim \
+  python main.py run-pipeline --business-date $(date +%F) --inject-fault all
+```
+
+Resultado esperado:
+
+- `quality_gate_d1` executa e reporta falhas de DQ.
+- O dashboard mostra:
+  - `DQ Failed = 3`
+  - trades duplicados
+  - preços de liquidação nulos
+  - posições com soma zero
+- Os logs contêm o mesmo `ctm_run_id`, `ctm_job`, `dd.trace_id` e `dd.span_id` do trace APM.
+
+## Rodar Falhas Hard
+
+Estes cenários fazem um job falhar, não apenas o gate de DQ:
+
+```bash
+make demo-hard-oracle-timeout BUSINESS_DATE=$(date +%F)
+make demo-hard-gate-fail BUSINESS_DATE=$(date +%F)
+make demo-hard-s3-down BUSINESS_DATE=$(date +%F)
+make demo-db-blocking BUSINESS_DATE=$(date +%F)
+make demo-db-deadlock BUSINESS_DATE=$(date +%F)
+```
+
+## Dashboard Datadog
+
+Dashboard principal:
+
+```text
+https://app.datadoghq.com/dashboard/6ug-s4c-mu3/b3-control-m-pipeline-operations?fromUser=true&refresh_mode=sliding&from_ts=1779881715239&to_ts=1779896115239&live=true
+```
+
+Definição local do dashboard:
+
+```text
+datadog/dashboards/b3_controlm_pipeline_ops.json
+```
+
+O dashboard está escopado para:
+
+```text
+env:demo
+service:controlm-sim
+```
+
+## O Que Mostrar no Datadog
+
+### Dashboard
+
+Mostre:
+
+- Pipelines OK / FAILED.
+- Jobs OK / NOT OK.
+- Duração dos jobs.
+- Cards de Data Quality.
+- Detalhes de DQ por check.
+- Paridade de contagem de linhas entre Oracle e SQL Server.
+
+### APM
+
+Pesquise:
+
+```text
+service:controlm-sim env:demo
+```
+
+Abra um trace de um job. O waterfall deve mostrar spans filhos para:
+
+- `demo-oracle`
+- `demo-sqlserver`
+- `mock-exchange`
+
+Isso demonstra o Python chamando Oracle, gravando no SQL Server e publicando no S3/MinIO.
+
+### Logs
+
+Pesquise:
+
+```text
+service:controlm-sim env:demo
+```
+
+Para uma execução específica:
+
+```text
+service:controlm-sim ctm_run_id:<run_id>
+```
+
+Para um trace específico:
+
+```text
+dd.trace_id:<trace_id>
+```
+
+Logs estruturados de job incluem:
+
+- `ctm_job`
+- `ctm_order_date`
+- `ctm_run_id`
+- `status`
+- `duration_seconds`
+- `output_rows`
+- `dd.trace_id`
+- `dd.span_id`
+
+### DBM
+
+Use DBM para mostrar:
+
+- Atividade de queries no SQL Server.
+- Queries fonte no Oracle.
+- Cenários de query lenta, blocking ou deadlock.
+- Tempo de query junto da duração do job Control-M.
+
+## Modelo de Telemetria
+
+### Métricas
+
+O wrapper Python emite métricas Control-M via DogStatsD:
+
+```text
+controlm.job.duration_seconds
+controlm.job.ended_ok
+controlm.job.ended_not_ok
+controlm.job.output_rows
+controlm.job.retries
+controlm.folder.duration
+controlm.folder.ended_ok
+controlm.folder.ended_not_ok
+controlm.dq.check_failed
+controlm.dq.check_ran
+controlm.dq.actual_value
+```
+
+Tags importantes:
+
+```text
+env:demo
+service:controlm-sim
+version:2.0.0
+ctm_job:<job_name>
+ctm_order_date:<business_date>
+ctm_run_id:<run_id>
+ctm_status:<status>
+```
+
+### Traces
+
+Cada job cria um trace APM com spans para:
+
+- Execução do wrapper Control-M.
+- Conexão e SQL no Oracle.
+- Conexão e SQL no SQL Server.
+- `put object` no MinIO/S3.
+
+### Logs
+
+O Agent faz tail destes arquivos:
+
+```text
+/data/logs/controlm-sim.log
+/data/logs/jobs.jsonl
+/data/runs.jsonl
+logs/demo-cron.log
+```
+
+Configurado em:
+
+```text
+datadog/conf.d/controlm_logs.d/conf.yaml
+```
+
+A correlação trace/log usa:
+
+```text
+dd.trace_id
+dd.span_id
+```
+
+### Correlação entre Métricas e Traces
+
+Métricas são séries temporais agregadas, então não carregam um trace ID único por ponto. O Datadog faz o pivot de uma métrica para traces/logs relacionados usando tags compartilhadas como:
+
+```text
+env
+service
+version
+ctm_job
+ctm_order_date
+```
+
+Para correlação exata por execução, use campos de trace ou log:
+
+```text
+ctm_run_id:<run_id>
+dd.trace_id:<trace_id>
+```
+
+## Control-M Workbench
+
+O Workbench é opcional e roda atrás de um profile do Compose:
+
+```bash
+make up-workbench
+```
+
+Deploy das variantes de jobs geradas:
+
+```bash
+make ctm-generate
+make ctm-deploy-all
+```
+
+O gerador lê:
+
+```text
+controlm/jobs/manifest.yaml
+```
+
+e produz variantes Script, Command, Embedded Script e Database.
+
+## Cron Sidecar
+
+Inicie o rotacionador de cenários:
+
+```bash
+podman compose --profile cron up -d --build demo-cron
+```
+
+Ele alterna cenários de sucesso, falha de DQ, hard failure e DBM. Os logs são escritos em:
+
+```text
+logs/demo-cron.log
+```
+
+e coletados pelo Datadog Agent.
+
+## Estrutura do Projeto
+
+```text
+.
+├── docker-compose.yml
+├── Makefile
+├── .env.example
+├── datadog/
+│   ├── Dockerfile
+│   ├── datadog.yaml
+│   ├── conf.d/
+│   └── dashboards/
+├── services/
+│   ├── controlm-sim/
+│   ├── pipeline-runner/
+│   ├── market-mock/
+│   └── cron-sidecar/
+├── controlm/
+│   ├── jobs/
+│   ├── scripts/
+│   └── generate.py
+├── sql/
+│   ├── oracle/
+│   ├── sqlserver/
+│   ├── postgres/
+│   ├── schema/
+│   └── seeds/
+├── terraform/
+└── docs/
+```
+
+## Comandos Comuns
+
+| Comando | Descrição |
+|---|---|
+| `make up` | Sobe a stack completa |
+| `make down` | Para os serviços |
+| `make clean` | Para os serviços e remove volumes |
+| `make status` | Mostra o status dos containers |
+| `make logs` | Acompanha logs do Compose |
+| `make dd-agent-status` | Mostra o status do Datadog Agent |
+| `make dd-smoke` | Emite uma métrica/trace de smoke |
+| `make generate-day` | Gera dados de mercado para uma data |
+| `make run-d1` | Roda a pipeline D+1 completa |
+| `make run-job JOB=quality_gate_d1` | Roda um job específico |
+| `make demo-hard-oracle-timeout` | Simula timeout no Oracle |
+| `make demo-hard-gate-fail` | Simula falha hard no gate de DQ |
+| `make demo-hard-s3-down` | Simula falha no S3/MinIO |
+| `make demo-db-blocking` | Simula blocking no banco |
+| `make demo-db-deadlock` | Simula deadlock no banco |
+
+## Troubleshooting
+
+### Sem Dados no Datadog
+
+Confira o `.env`:
+
+```bash
+cat .env
+```
+
+Depois confira o Agent:
+
+```bash
+make dd-agent-status
+```
+
+### Logs Não Aparecem no Trace APM
+
+Abra um trace novo, gerado depois da última versão do código estar rodando. Traces antigos não recebem correlação de logs retroativamente.
+
+Confira os logs diretamente:
+
+```text
+service:controlm-sim dd.trace_id:<trace_id>
+```
+
+### Dashboard Sem Dados
+
+Use `Past 30 Minutes` ou `Past 1 Hour`, depois rode:
+
+```bash
+podman exec -e JOB_PADDING_FACTOR=0 demo-controlm-sim \
+  python main.py run-pipeline --business-date $(date +%F)
+```
+
+### Agent Não Consegue Ler Logs
+
+Confira as integrações de tail de arquivo:
+
+```bash
+podman exec demo-datadog-agent agent status
+```
+
+Procure pela seção `controlm_logs`.
+
+## Fluxo Sugerido Para Video
+
+1. Explique o desafio: jobs Control-M são difíceis de diagnosticar apenas pelo status.
+2. Explique a estratégia: métricas para visão geral, APM para caminho de execução, logs para evidência e DBM para diagnóstico de banco.
+3. Clone o repositório e configure `.env`.
+4. Suba com `podman compose up -d --build`.
+5. Rode um happy path.
+6. Rode uma falha de DQ.
+7. Mostre o dashboard Datadog.
+8. Abra um trace e mostre spans filhos para Oracle, SQL Server e S3.
+9. Abra logs a partir do trace e mostre `dd.trace_id`.
+10. Abra DBM para evidências de queries no SQL Server/Oracle.
+
+## Licença
+
+Prova de conceito para fins de demonstração.
+
+---
+
+# English Version
+
 # B3 Control-M Observability POC
 
 Proof of Concept for a B3-style D+1 batch pipeline orchestrated by a Control-M-like wrapper and observed with Datadog.
