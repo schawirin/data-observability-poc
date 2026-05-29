@@ -186,6 +186,9 @@ services:
     volumes:
       - ./datadog/conf.d:/etc/datadog-agent/conf.d
       - ./datadog/datadog.yaml:/etc/datadog-agent/datadog.yaml:ro
+      # Runtime socket enables container metadata/autodiscovery for optional
+      # CI/CD and DinD experiments. File log tailing below remains the fallback.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - sqlserver_data:/var/log/sqlserver:ro
       - controlm-sim-data:/var/log/controlm-sim:ro
       - ./logs:/var/log/b3-demo:ro
@@ -410,6 +413,58 @@ services:
       market-mock:
         condition: service_started
 
+  # ── Docker-in-Docker CI/CD demo ──────────────────────────────────────────
+  # Optional profile that mimics a Jenkins job running docker build/docker run
+  # against an isolated Docker daemon. Start with `make dind-run`.
+  ci-dind:
+    profiles: ["dind"]
+    image: docker:27-dind
+    container_name: demo-ci-dind
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command:
+      - --host=tcp://0.0.0.0:2375
+      - --host=unix:///var/run/docker.sock
+    volumes:
+      - ci_dind_data:/var/lib/docker
+      - ./logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "docker info >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"docker","service":"ci-dind"}]'
+      com.datadoghq.tags.env: "demo"
+      com.datadoghq.tags.service: "ci-dind"
+      com.datadoghq.tags.component: "ci-cd"
+
+  ci-jenkins-job:
+    profiles: ["dind"]
+    image: docker:27-cli
+    container_name: demo-ci-jenkins-job
+    environment:
+      DOCKER_HOST: tcp://ci-dind:2375
+      CI_PIPELINE_NAME: b3-dind-demo
+      CI_LOG_FILE: /logs/dind-ci.log
+    volumes:
+      - ./services/ci-dind:/workspace:ro
+      - ./logs:/logs
+    entrypoint: ["/bin/sh", "/workspace/run_ci_job.sh"]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"jenkins","service":"ci-jenkins-job"}]'
+      com.datadoghq.tags.env: "demo"
+      com.datadoghq.tags.service: "ci-jenkins-job"
+      com.datadoghq.tags.component: "ci-cd"
+      com.datadoghq.tags.ci_provider: "jenkins"
+    depends_on:
+      ci-dind:
+        condition: service_healthy
+      datadog-agent:
+        condition: service_started
+
   controlm-workbench:
     profiles: ["workbench"]
     image: registry.hub.docker.com/controlm/workbench:latest
@@ -449,6 +504,7 @@ volumes:
   oracle_data:
   sqlserver_data:
   controlm-sim-data:
+  ci_dind_data:
 
 # Rede dedicada para a POC — isola este stack de outros projetos com Datadog Agent
 # (ex: outro projeto DogBank rodando em paralelo na mesma máquina). Todos os

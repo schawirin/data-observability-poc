@@ -421,6 +421,39 @@ logs/demo-cron.log
 
 e coletados pelo Datadog Agent.
 
+## Teste Docker-in-Docker para CI/CD
+
+Existe um profile opcional `dind` para simular um job de CI/CD no estilo Jenkins. Ele sobe:
+
+- `demo-ci-dind`: daemon Docker isolado rodando dentro de um container.
+- `demo-ci-jenkins-job`: job temporário que executa `docker build`, `docker run`, `docker ps` e `docker system df` contra o daemon DinD.
+
+Rodar o teste:
+
+```bash
+make dind-run
+```
+
+Ver logs locais:
+
+```bash
+tail -f logs/dind-ci.log
+```
+
+Ver no Datadog:
+
+```text
+service:ci-jenkins-job env:demo
+```
+
+Parar o daemon DinD:
+
+```bash
+make dind-down
+```
+
+Este profile é independente da pipeline B3 principal. Ele serve apenas para observar no Datadog o comportamento de um job CI/CD que cria containers dentro de um daemon Docker interno.
+
 ## Estrutura do Projeto
 
 ```text
@@ -960,6 +993,39 @@ logs/demo-cron.log
 ```
 
 and tailed by the Datadog Agent.
+
+## Docker-in-Docker CI/CD Test
+
+An optional `dind` profile simulates a Jenkins-like CI/CD job. It starts:
+
+- `demo-ci-dind`: an isolated Docker daemon running inside a container.
+- `demo-ci-jenkins-job`: a temporary job that runs `docker build`, `docker run`, `docker ps`, and `docker system df` against the DinD daemon.
+
+Run the test:
+
+```bash
+make dind-run
+```
+
+Tail local logs:
+
+```bash
+tail -f logs/dind-ci.log
+```
+
+Query in Datadog:
+
+```text
+service:ci-jenkins-job env:demo
+```
+
+Stop the DinD daemon:
+
+```bash
+make dind-down
+```
+
+This profile is independent from the main B3 pipeline. It is only meant to observe in Datadog how a CI/CD job behaves when it creates containers inside an internal Docker daemon.
 
 ## Project Structure
 

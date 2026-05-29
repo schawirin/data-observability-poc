@@ -38,3 +38,14 @@ logs:
       - team:data-platform
       - component:controlm
       - log_type:cron_rotation
+
+  - type: file
+    path: /var/log/b3-demo/dind-ci.log
+    source: jenkins
+    service: ci-jenkins-job
+    tags:
+      - env:demo
+      - team:data-platform
+      - component:ci-cd
+      - ci_provider:jenkins
+      - log_type:dind_ci

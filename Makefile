@@ -5,7 +5,8 @@
         demo-caso1 demo-caso2 demo-caso3 demo-overflow demo-row-count-diff \
         demo-hard-oracle-timeout demo-hard-gate-fail demo-hard-s3-down demo-hard-all \
         demo-db-blocking demo-db-deadlock \
-        up-workbench dd-agent-status dd-smoke
+        up-workbench dd-agent-status dd-smoke \
+        dind-up dind-run dind-logs dind-down
 
 # Default business date: today
 BUSINESS_DATE ?= $(shell date +%Y-%m-%d)
@@ -53,6 +54,27 @@ dd-smoke:
 	$(COMPOSE) run --rm --no-deps controlm-sim python main.py emit-smoke-metrics --business-date $(BUSINESS_DATE)
 	@echo "✓ Check Datadog metric: sum:controlm.job.executions{env:demo,ctm_job:leitura_dados}.as_count()"
 	@echo "✓ Existing trace widget can use: sum:trace.controlm.job.leitura_dados.hits{env:demo}"
+
+# ─── Docker-in-Docker CI/CD demo ─────────────────────────────────
+dind-up:
+	@echo "▶ Starting optional Docker-in-Docker daemon for CI/CD testing..."
+	$(COMPOSE) --profile dind up -d datadog-agent ci-dind
+	@echo "✓ DinD daemon ready target: tcp://ci-dind:2375"
+
+dind-run:
+	@echo "▶ Running Jenkins-like Docker-in-Docker CI job..."
+	@mkdir -p logs
+	$(COMPOSE) --profile dind up -d datadog-agent ci-dind
+	$(COMPOSE) --profile dind up --force-recreate ci-jenkins-job
+	@echo "✓ CI job finished. Datadog logs query: service:ci-jenkins-job env:demo"
+	@echo "✓ Local log: logs/dind-ci.log"
+
+dind-logs:
+	$(COMPOSE) --profile dind logs -f --tail=100 ci-dind ci-jenkins-job
+
+dind-down:
+	$(COMPOSE) --profile dind rm -sf ci-jenkins-job
+	$(COMPOSE) --profile dind stop ci-dind
 
 # ─── Data ────────────────────────────────────────────────────────
 seed:
